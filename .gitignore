@@ -12,9 +12,6 @@ venv/
 .ipynb_checkpoints/
 
 # Data files
-*.csv
-feedback_data.csv
-inventory_recommendations.csv
 
 # IDE specific files
 *.idea/
