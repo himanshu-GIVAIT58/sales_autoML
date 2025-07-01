@@ -10,7 +10,7 @@ on:
       - "src/feature_engineering.py"
       - "src/data_loader.py"
       - ".env"
-      - ".github/workflows/**" # Include workflow files to trigger the workflow
+      - ".github/workflows/**"
 
   schedule:
     - cron: "0 0 1 * *"
@@ -53,9 +53,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r src/requirements.txt
 
-      # Step 5: Run the training script
+      # Step 5: Wait for MongoDB
+      - name: Wait for MongoDB
+        run: |
+          curl -o wait-for-it.sh https://raw.githubusercontent.com/vishnubob/wait-for-it/master/wait-for-it.sh
+          chmod +x wait-for-it.sh
+          ./wait-for-it.sh mongodb:27017 --timeout=60 --strict -- echo "MongoDB is up"
+
+      # Step 6: Run the training script
       - name: Run training script
         env:
-          MONGO_URI: mongodb://root:example@mongodb:27017/ # Use the Docker service name
+          MONGO_URI: mongodb://root:example@mongodb:27017/
           MONGO_DB: sales_automl
         run: python -m src.main
