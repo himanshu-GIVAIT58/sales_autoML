@@ -52,4 +52,4 @@ jobs:
         env:
           MONGO_URI: mongodb://mongodb:27017/ # Use the Docker service name
           MONGO_DB: sales_automl
-        run: python src/main.py
+        run: python -m src.main

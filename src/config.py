@@ -14,7 +14,7 @@ ABC_CONFIG = {
 }
 
 # --- Model & Data Parameters ---
-MAX_SKUS = 3000
+MAX_SKUS = 1000
 PREDICTION_LENGTH = 183
 
 KNOWN_COVARIATES_NAMES = [
@@ -26,7 +26,7 @@ KNOWN_COVARIATES_NAMES = [
 
 # --- AutoGluon Model Training Parameters ---
 AUTOGLUON_PRESETS = "fast_training"
-TIME_LIMIT = 300
+TIME_LIMIT = 900
 NUM_VAL_WINDOWS = 5
 EVAL_METRIC = "MASE"
 FREQ = "D"

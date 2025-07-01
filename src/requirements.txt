@@ -1,6 +1,7 @@
 pandas
 numpy
 scipy
+streamlit
 autogluon
 pymongo
 python-dotenv

@@ -10,6 +10,7 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from pymongo import MongoClient
 from dotenv import load_dotenv
+from data_loader import load_latest_recommendation_data
 
 # --- Load environment variables ---
 load_dotenv()
@@ -24,23 +25,20 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+
 # --- Data Loading ---
-def load_recommendation_data_from_mongo(collection_name="inventory_recommendations", mongo_uri=MONGO_URI, db_name=MONGO_DB) -> Optional[pd.DataFrame]:
-    """Loads and processes the recommendation data from MongoDB."""
+def load_recommendation_data_from_mongo() -> Optional[pd.DataFrame]:
+    """
+    Loads the latest inventory recommendations from MongoDB using data_loader.
+    """
     try:
-        client = MongoClient(mongo_uri)
-        db = client[db_name]
-        collection = db[collection_name]
-        df = pd.DataFrame(list(collection.find()))
-        client.close()
-        if "_id" in df.columns:
-            df = df.drop(columns=["_id"])
-        # Ensure the column name is correctly handled if it already exists
-        if 'economic_order_quantity (EOQ)' in df.columns:
-            df.rename(columns={'economic_order_quantity (EOQ)': 'eoq'}, inplace=True)
+        df = load_latest_recommendation_data(mongo_uri=MONGO_URI, db_name=MONGO_DB)
+        if df.empty:
+            st.warning("No data found in the latest recommendations collection.")
+            return None
         return df
     except Exception as e:
-        st.error(f"⚠️ An error occurred while loading data from MongoDB: {str(e)}", icon="🚨")
+        st.error(f"⚠️ An error occurred while loading the latest recommendations: {str(e)}", icon="🚨")
         return None
 
 # --- MongoDB Feedback Save ---
@@ -73,7 +71,7 @@ def display_sku_overview(sku_data: pd.DataFrame) -> None:
             )
             st.markdown(f"**Safety Stock:** `{row['safety_stock']}`")
             st.markdown(f"**Reorder Point:** `{row['reorder_point']}`")
-            st.markdown(f"**Order Quantity (EOQ):** `{row['eoq']}`")
+            st.markdown(f"**Order Quantity (EOQ):** `{row['economic_order_quantity (EOQ)']}`")
 
 def display_demand_chart(sku_data: pd.DataFrame) -> None:
     """Visualizes the total forecasted demand across different horizons."""
@@ -205,7 +203,7 @@ def save_feedback(selected_sku: str, sku_data: pd.DataFrame, feedback: str):
             "total_forecasted_demand": row['total_forecasted_demand'],
             "safety_stock": row['safety_stock'],
             "reorder_point": row['reorder_point'],
-            "eoq": row['eoq']
+            "eoq": row['economic_order_quantity (EOQ)']
         })
     
     new_feedback_df = pd.DataFrame(feedback_records)

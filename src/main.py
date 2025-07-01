@@ -6,12 +6,12 @@ from dotenv import load_dotenv
 from autogluon.timeseries import TimeSeriesDataFrame
 
 # Import project modules
-import src.config as config
-import graphs.data_loader as data_loader
-import src.feature_engineering as feature_engineering
-import src.model_handler as model_handler
-import src.inventory_calculator as inventory_calculator
-import src.model_monitor as model_monitor  # <-- our new file
+from . import config
+from . import data_loader
+from . import feature_engineering
+from . import model_handler
+from . import inventory_calculator
+from . import model_monitor
 
 def main():
     """Main function to run the entire pipeline."""
@@ -74,6 +74,7 @@ def main():
     if metrics is None:
         metrics = {'MAPE': 999}  # fallback if evaluate_predictor does not return anything
     print(f"\nModel evaluation metrics: {metrics}")
+
     # --- 6. Generate Predictions ---
     # We need the original holidays dataframe for future feature generation
     _, _, holidays_df_for_future = data_loader.load_data(use_mongo=True)

@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 # Project modules
 import src.config as config
-import graphs.data_loader as data_loader
+import data_loader as data_loader
 import src.feature_engineering as feature_engineering
 
 def run_eda_from_mongo(
