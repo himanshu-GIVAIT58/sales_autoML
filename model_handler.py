@@ -1,7 +1,3 @@
-# model_handler.py
-"""
-Handles model training, evaluation, and prediction using AutoGluon.
-"""
 import pandas as pd
 from autogluon.timeseries import TimeSeriesDataFrame, TimeSeriesPredictor
 from feature_engineering import create_jewelry_features
@@ -13,11 +9,11 @@ def train_predictor(ts_data, config):
     print("\nTraining forecasting models with enhanced configuration...")
     predictor = TimeSeriesPredictor(
         prediction_length=config.PREDICTION_LENGTH,
-        target="target",
+        target=config.TARGET_COLUMN,
         known_covariates_names=config.KNOWN_COVARIATES_NAMES,
-        freq='D',
-        eval_metric="MASE",
-        quantile_levels=[0.1, 0.25, 0.5, 0.75, 0.9]
+        freq=config.FREQ,
+        eval_metric=config.EVAL_METRIC,
+        quantile_levels=config.QUANTILE_LEVELS
     ).fit(
         ts_data,
         presets=config.AUTOGLUON_PRESETS,

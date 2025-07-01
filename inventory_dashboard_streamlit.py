@@ -8,6 +8,13 @@ from io import StringIO
 import numpy as np
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+from pymongo import MongoClient
+from dotenv import load_dotenv
+
+# --- Load environment variables ---
+load_dotenv()
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+MONGO_DB = os.getenv("MONGO_DB", "sales_automl")
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -17,41 +24,35 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Constants & Data ---
-CSV_FILEPATH = "inventory_recommendations.csv"
-FEEDBACK_FILEPATH = "feedback_data.csv"
-
 # --- Data Loading ---
-@st.cache_data(show_spinner="Loading recommendation data...")
-def load_recommendation_data(filepath: str) -> Optional[pd.DataFrame]:
-    """Loads and processes the recommendation data from a CSV file."""
+def load_recommendation_data_from_mongo(collection_name="inventory_recommendations", mongo_uri=MONGO_URI, db_name=MONGO_DB) -> Optional[pd.DataFrame]:
+    """Loads and processes the recommendation data from MongoDB."""
     try:
-        # Create a dummy CSV if it doesn't exist for demonstration purposes
-        if not os.path.exists(filepath):
-            data = {
-                'item_id': ['SKU001', 'SKU001', 'SKU001', 'SKU002', 'SKU002', 'SKU002', 'SKU003', 'SKU003', 'SKU003'],
-                'channel': ['App', 'Web', 'Offline', 'App', 'Web', 'Offline', 'App', 'Web', 'Offline'],
-                'horizon': ['1-Month', '3-Month', '6-Month', '1-Month', '3-Month', '6-Month', '1-Month', '3-Month', '6-Month'],
-                'forecast_days': [30, 90, 180, 30, 90, 180, 30, 90, 180],
-                'total_forecasted_demand': [100, 310, 650, 150, 460, 980, 80, 250, 500],
-                'safety_stock': [10, 30, 60, 15, 45, 90, 8, 24, 48],
-                'reorder_point': [20, 60, 120, 30, 90, 180, 16, 48, 96],
-                'economic_order_quantity (EOQ)': [50, 150, 300, 75, 225, 450, 40, 120, 240]
-            }
-            dummy_df = pd.DataFrame(data)
-            dummy_df.to_csv(filepath, index=False)
-
-        df = pd.read_csv(filepath)
+        client = MongoClient(mongo_uri)
+        db = client[db_name]
+        collection = db[collection_name]
+        df = pd.DataFrame(list(collection.find()))
+        client.close()
+        if "_id" in df.columns:
+            df = df.drop(columns=["_id"])
         # Ensure the column name is correctly handled if it already exists
         if 'economic_order_quantity (EOQ)' in df.columns:
             df.rename(columns={'economic_order_quantity (EOQ)': 'eoq'}, inplace=True)
         return df
-    except FileNotFoundError:
-        st.error(f"⚠️ File not found: `{filepath}`. Please ensure this file is in the same directory as your script.", icon="🚨")
-        return None
     except Exception as e:
-        st.error(f"⚠️ An error occurred while loading data: {str(e)}", icon="🚨")
+        st.error(f"⚠️ An error occurred while loading data from MongoDB: {str(e)}", icon="🚨")
         return None
+
+# --- MongoDB Feedback Save ---
+def save_feedback_to_mongo(feedback_df: pd.DataFrame, collection_name="feedback_data", mongo_uri=MONGO_URI, db_name=MONGO_DB):
+    try:
+        client = MongoClient(mongo_uri)
+        db = client[db_name]
+        collection = db[collection_name]
+        collection.insert_many(feedback_df.to_dict("records"))
+        client.close()
+    except Exception as e:
+        st.error(f"⚠️ Could not save feedback to MongoDB: {str(e)}", icon="🚨")
 
 # --- UI Helper Functions ---
 def display_sku_overview(sku_data: pd.DataFrame) -> None:
@@ -191,7 +192,7 @@ def display_chatbot(selected_sku: str, full_df: pd.DataFrame) -> None:
             st.chat_message("assistant").write(response)
 
 def save_feedback(selected_sku: str, sku_data: pd.DataFrame, feedback: str):
-    """Saves the user feedback to a CSV file."""
+    """Saves the user feedback to MongoDB."""
     # Prepare the data to be saved
     feedback_records = []
     for index, row in sku_data.iterrows():
@@ -210,20 +211,14 @@ def save_feedback(selected_sku: str, sku_data: pd.DataFrame, feedback: str):
     new_feedback_df = pd.DataFrame(feedback_records)
 
     try:
-        if os.path.exists(FEEDBACK_FILEPATH):
-            # Append to existing file
-            feedback_df = pd.read_csv(FEEDBACK_FILEPATH)
-            combined_df = pd.concat([feedback_df, new_feedback_df], ignore_index=True)
-            combined_df.to_csv(FEEDBACK_FILEPATH, index=False)
-        else:
-            # Create a new file
-            new_feedback_df.to_csv(FEEDBACK_FILEPATH, index=False)
+        # Save to MongoDB only
+        save_feedback_to_mongo(new_feedback_df)
         st.success("Thank you for your feedback! It has been recorded.")
     except Exception as e:
         st.error(f"⚠️ An error occurred while saving feedback: {str(e)}", icon="🚨")
 
 def capture_feedback(selected_sku: str, sku_data: pd.DataFrame):
-    """Displays feedback buttons and saves the feedback to a CSV file."""
+    """Displays feedback buttons and saves the feedback to MongoDB."""
     st.subheader("Was this forecast helpful?", divider="green")
     
     feedback_col1, feedback_col2 = st.columns(2)
@@ -239,11 +234,11 @@ def capture_feedback(selected_sku: str, sku_data: pd.DataFrame):
 # --- Main Application ---
 st.title('📦 Inventory Recommendations Dashboard')
 
-# Load data from the CSV file
-reco_df = load_recommendation_data(CSV_FILEPATH)
+# Load data from MongoDB
+reco_df = load_recommendation_data_from_mongo()
 
 if reco_df is None or reco_df.empty:
-    st.info("ℹ️ Awaiting data. Please ensure `inventory_recommendations.csv` is in the correct directory.", icon="⏳")
+    st.info("ℹ️ Awaiting data. Please ensure recommendations are available in MongoDB.", icon="⏳")
 else:
     # --- Sidebar for SKU Selection ---
     with st.sidebar:

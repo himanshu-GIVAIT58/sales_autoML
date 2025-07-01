@@ -2,3 +2,5 @@ pandas
 numpy
 scipy
 autogluon
+pymongo
+python-dotenv

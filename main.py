@@ -1,16 +1,8 @@
-# main.py
-"""
-Main orchestration script for the inventory forecasting pipeline.
-This script imports modules and executes the end-to-end process:
-1. Load Configuration
-2. Load Data
-3. Engineer Features
-4. Train Model
-5. Generate Predictions
-6. Calculate Inventory Recommendations
-7. Save Results
-"""
+import datetime
+import os
 import pandas as pd
+from pymongo import MongoClient
+from dotenv import load_dotenv
 from autogluon.timeseries import TimeSeriesDataFrame
 
 # Import project modules
@@ -19,16 +11,13 @@ import data_loader
 import feature_engineering
 import model_handler
 import inventory_calculator
+import model_monitor  # <-- our new file
 
 def main():
     """Main function to run the entire pipeline."""
-    
-    # --- 1. Load Data ---
-    sales_df, inventory_df, holidays_df = data_loader.load_data(
-        config.SOURCE_FILENAME,
-        config.INVENTORY_FILENAME,
-        config.HOLIDAYS_FILENAME
-    )
+
+    # --- 1. Load Data from MongoDB ---
+    sales_df, inventory_df, holidays_df = data_loader.load_data(use_mongo=True)
 
     # --- 2. Prepare Data and Engineer Features ---
     processed_data, static_features_base = feature_engineering.prepare_data(
@@ -37,6 +26,9 @@ def main():
         holidays_df,
         config.MAX_SKUS
     )
+
+    # --- Store processed training data in MongoDB ---
+    data_loader.save_dataframe_to_mongo(processed_data, "processed_training_data")
 
     # --- 3. ABC Analysis & Data Filtering ---
     print("\nPerforming ABC Analysis...")
@@ -47,8 +39,8 @@ def main():
     b_cutoff = a_cutoff + int(len(total_sales_df) * config.ABC_CONFIG['B_class_percentage'])
     
     total_sales_df['class'] = 'C'
-    total_sales_df.iloc[:a_cutoff, total_sales_df.columns.get_loc('class')] = 'A'
-    total_sales_df.iloc[a_cutoff:b_cutoff, total_sales_df.columns.get_loc('class')] = 'B'
+    total_sales_df.loc[total_sales_df.index[:a_cutoff], 'class'] = 'A'
+    total_sales_df.loc[total_sales_df.index[a_cutoff:b_cutoff], 'class'] = 'B'
     item_to_class_map = total_sales_df['class'].to_dict()
 
     # Filter for items with enough historical data for modeling
@@ -78,13 +70,13 @@ def main():
 
     # --- 5. Train and Evaluate Model ---
     predictor = model_handler.train_predictor(ts_data, config)
-    model_handler.evaluate_predictor(predictor, ts_data)
-    
+    metrics = model_handler.evaluate_predictor(predictor, ts_data)
+    if metrics is None:
+        metrics = {'MAPE': 999}  # fallback if evaluate_predictor does not return anything
+    print(f"\nModel evaluation metrics: {metrics}")
     # --- 6. Generate Predictions ---
     # We need the original holidays dataframe for future feature generation
-    _, _, holidays_df_for_future = data_loader.load_data(
-        config.SOURCE_FILENAME, config.INVENTORY_FILENAME, config.HOLIDAYS_FILENAME
-    )
+    _, _, holidays_df_for_future = data_loader.load_data(use_mongo=True)
     holidays_df_for_future.rename(columns={'Date': 'timestamp'}, inplace=True)
     holidays_df_for_future['timestamp'] = pd.to_datetime(holidays_df_for_future['timestamp'].astype(str).str.split('T').str[0])
     holidays_df_for_future['is_holiday'] = 1
@@ -102,9 +94,40 @@ def main():
     # Apply any final business logic
     final_recommendations = inventory_calculator.apply_business_rules(recommendations_df)
 
-    # --- 8. Save and Display Results ---
-    final_recommendations.to_csv(config.OUTPUT_FILENAME, index=False)
-    print(f"\nInventory recommendations saved to '{config.OUTPUT_FILENAME}'")
+    # --- 8. Save Results to MongoDB with check ---
+    load_dotenv()
+    MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+    MONGO_DB = os.getenv("MONGO_DB", "sales_automl")
+    client = MongoClient(MONGO_URI)
+    db = client[MONGO_DB]
+
+    trained_date = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    new_collection_name = f"inventory_recommendations_{trained_date}"
+    data_loader.save_dataframe_to_mongo(final_recommendations, new_collection_name)
+    print(f"\nSaved new recommendations to '{new_collection_name}' in MongoDB.")
+
+    # Log this run's metadata
+    model_monitor.log_model_run(
+        predictor=predictor,
+        collection_name=new_collection_name,
+        performance_metrics={"MASE": metrics.get("MASE", 999)},  # Example usage
+        data_snapshot_info={"data_rows": len(processed_data)},   # Could also track data time ranges
+        trigger_source="manual"
+    )
+
+    # OPTIONAL: Compare current run’s performance to the previous run
+    is_better = model_monitor.compare_model_performance(db, new_collection_name)
+    if not is_better:
+        print("New model underperforms the previous model. Rolling back to older version.")
+        revert_collection = model_monitor.rollback_to_previous_version(db)
+        print(f"Reverted to {revert_collection} (if non-empty).")
+    else:
+        print("New model improvements accepted.")
+    
+    # OPTIONAL: Data drift check (requires old dataset & new dataset)
+    # e.g., if you saved an old version of data in Mongo or locally
+    # has_drift = model_monitor.check_for_drift(previous_data, new_data)
+
     print("\n--- Sample of Final Inventory Recommendations ---")
     print(final_recommendations.head(15))
     if len(final_recommendations) > 15:
