@@ -11,7 +11,6 @@ on:
       - "src/data_loader.py"
       - ".env"
 
-  # Trigger on a schedule (monthly on the 1st at midnight UTC)
   schedule:
     - cron: "0 0 1 * *"
 
@@ -34,23 +33,28 @@ jobs:
       # Step 1: Checkout the code
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # Step 2: Set up Python environment
+      # Step 2: Debug - List files
+      - name: List files
+        run: ls -R
+
+      # Step 3: Set up Python environment
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # Step 3: Install dependencies
+      # Step 4: Install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r src/requirements.txt
 
-      # Step 4: Run the training script
+      # Step 5: Run the training script
       - name: Run training script
         env:
           MONGO_URI: mongodb://root:example@mongodb:27017/ # Use the Docker service name
           MONGO_DB: sales_automl
         run: python -m src/main.py
-          
