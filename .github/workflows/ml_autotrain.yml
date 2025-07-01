@@ -45,11 +45,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r src/requirements.txt
 
       # Step 4: Run the training script
       - name: Run training script
         env:
           MONGO_URI: mongodb://root:example@mongodb:27017/ # Use the Docker service name
           MONGO_DB: sales_automl
-        run: python src/main.py
+        run: python -m src/main.py
+          
