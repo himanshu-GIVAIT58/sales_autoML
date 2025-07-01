@@ -53,13 +53,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r src/requirements.txt
 
-      # Step 5: Wait for MongoDB
-      - name: Wait for MongoDB
-        run: |
-          curl -o wait-for-it.sh https://raw.githubusercontent.com/vishnubob/wait-for-it/master/wait-for-it.sh
-          chmod +x wait-for-it.sh
-          ./wait-for-it.sh mongodb:27017 --timeout=120 --strict -- echo "MongoDB is up"
-
       # Step 6: Debug MongoDB Logs (Optional)
       - name: Debug MongoDB Logs
         run: docker logs $(docker ps -q --filter "name=mongodb")
