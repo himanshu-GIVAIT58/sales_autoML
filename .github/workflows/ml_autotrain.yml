@@ -10,6 +10,7 @@ on:
       - "src/feature_engineering.py"
       - "src/data_loader.py"
       - ".env"
+      - ".github/workflows/**" # Include workflow files to trigger the workflow
 
   schedule:
     - cron: "0 0 1 * *"
