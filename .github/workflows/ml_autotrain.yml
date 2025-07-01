@@ -59,7 +59,7 @@ jobs:
 
       # Step 6: Debug MongoDB Logs (Optional)
       - name: Debug MongoDB Logs
-        run: docker logs $(docker ps -q --filter "name=mongodb")
+        run: docker logs $(docker ps -q --filter "ancestor=mongo:6.0")
 
       # Step 7: Run the training script
       - name: Run training script
