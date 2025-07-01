@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sales_automl_app
+    ports:
+      - "8501:8501" # Map Streamlit's default port to localhost
+    env_file:
+      - .env # Pass environment variables to the container
+    volumes:
+      - ./src:/app # Mount the source code for development
+    depends_on:
+      - mongodb
+
+  mongodb:
+    image: mongo:6.0
+    container_name: sales_automl_mongo
+    ports:
+      - "27017:27017" # Expose MongoDB's default port
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: example
+    volumes:
+      - mongo_data:/data/db # Persist MongoDB data
+
+volumes:
+  mongo_data:

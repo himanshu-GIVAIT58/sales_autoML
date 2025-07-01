@@ -6,12 +6,12 @@ from dotenv import load_dotenv
 from autogluon.timeseries import TimeSeriesDataFrame
 
 # Import project modules
-import config
-import data_loader
-import feature_engineering
-import model_handler
-import inventory_calculator
-import model_monitor  # <-- our new file
+import src.config as config
+import graphs.data_loader as data_loader
+import src.feature_engineering as feature_engineering
+import src.model_handler as model_handler
+import src.inventory_calculator as inventory_calculator
+import src.model_monitor as model_monitor  # <-- our new file
 
 def main():
     """Main function to run the entire pipeline."""

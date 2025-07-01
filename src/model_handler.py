@@ -1,6 +1,6 @@
 import pandas as pd
 from autogluon.timeseries import TimeSeriesDataFrame, TimeSeriesPredictor
-from feature_engineering import create_jewelry_features
+from src.feature_engineering import create_jewelry_features
 
 def train_predictor(ts_data, config):
     """

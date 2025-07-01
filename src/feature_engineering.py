@@ -114,11 +114,11 @@ def prepare_data(source_data, inventory_data, holidays_data, max_skus=None):
     df_daily = df.groupby(["item_id", "sku", "channel", "timestamp"]).agg(agg_dict).reset_index()
 
     # Regularize data to ensure one row per day per item
-    all_items_channel = df_daily["item_id"].unique()
+    all_items_channel = df_daily["item_id"].unique().tolist()
     min_date = df_daily["timestamp"].min()
     max_date = df_daily["timestamp"].max()
     date_range = pd.date_range(start=min_date, end=max_date, freq='D')
-    full_template = pd.MultiIndex.from_product([all_items_channel, date_range], names=["item_id", "timestamp"]).to_frame(index=False)
+    full_template = pd.MultiIndex.from_product([all_items_channel, list(date_range)], names=["item_id", "timestamp"]).to_frame(index=False)
     regularized_data = pd.merge(full_template, df_daily, on=["item_id", "timestamp"], how="left")
 
     # Re-create SKU and channel from item_id and forward-fill missing features

@@ -234,59 +234,82 @@ def capture_feedback(selected_sku: str, sku_data: pd.DataFrame):
 # --- Main Application ---
 st.title('📦 Inventory Recommendations Dashboard')
 
-# Load data from MongoDB
-reco_df = load_recommendation_data_from_mongo()
+# 1) Create a radio button in the sidebar to select a page
+st.sidebar.title("Navigation")
+page = st.sidebar.radio("Go to:", ["Recommendations", "Analyze Data"])
 
-if reco_df is None or reco_df.empty:
-    st.info("ℹ️ Awaiting data. Please ensure recommendations are available in MongoDB.", icon="⏳")
-else:
-    # --- Sidebar for SKU Selection ---
-    with st.sidebar:
-        st.header("⚙️ SKU Selection")
-        sku_list = sorted(reco_df['item_id'].unique())
-        search_term = st.text_input("Search SKU:", placeholder="Enter Item ID...")
-        if search_term:
-            filtered_sku_list = [sku for sku in sku_list if search_term.lower() in str(sku).lower()]
-        else:
-            filtered_sku_list = sku_list
+if page == "Recommendations":
+    # --- Main Content: Recommendations ---
+    # Load data from MongoDB
+    reco_df = load_recommendation_data_from_mongo()
 
-        if not filtered_sku_list:
-            st.warning("No SKUs found for your search term.")
-            selected_sku = None
-        else:
-            selected_sku = st.radio("Select Item:", filtered_sku_list, index=0)
-
-    # --- Main Content Area ---
-    if selected_sku:
-        st.header(f"Analysis for Item: `{selected_sku}`", divider="rainbow")
-        sku_data = reco_df[reco_df['item_id'] == selected_sku].sort_values('forecast_days')
-
-        if sku_data.empty:
-            st.error(f"No data found for the selected item: {selected_sku}")
-        else:
-            # Calculate the overall total forecast for the selected SKU for the 6-month horizon
-            total_forecast = sku_data[sku_data['horizon'] == '6-Month']['total_forecasted_demand'].sum()
-            
-            # Display the overall total forecast
-            st.subheader(f"Overall 6-Month Total Forecast: {total_forecast:,.0f} units", 
-                         help="This is the total forecasted demand across all channels for the selected SKU over the 6-month horizon.")
-
-            # Display the main metrics and charts
-            display_sku_overview(sku_data)
-            st.markdown("<br>", unsafe_allow_html=True)  # Spacer
-            display_demand_chart(sku_data)
-
-            # Display the raw data in a tab
-            with st.expander("📋 View Raw Data"):
-                st.dataframe(sku_data, use_container_width=True, hide_index=True)
-
-            # Display the chatbot, passing the full dataframe for context
-            display_chatbot(selected_sku, reco_df)
-            
-            # Add a divider before the feedback section
-            st.markdown("---")
-
-            # Display the feedback section
-            capture_feedback(selected_sku, sku_data)
+    if reco_df is None or reco_df.empty:
+        st.info("ℹ️ Awaiting data. Please ensure recommendations are available in MongoDB.", icon="⏳")
     else:
-        st.info("Please select an item from the sidebar to see the detailed analysis.", icon="👈")
+        # --- Sidebar for SKU Selection ---
+        with st.sidebar:
+            st.header("⚙️ SKU Selection")
+            sku_list = sorted(reco_df['item_id'].unique())
+            search_term = st.text_input("Search SKU:", placeholder="Enter Item ID...")
+            if search_term:
+                filtered_sku_list = [sku for sku in sku_list if search_term.lower() in str(sku).lower()]
+            else:
+                filtered_sku_list = sku_list
+
+            if not filtered_sku_list:
+                st.warning("No SKUs found for your search term.")
+                selected_sku = None
+            else:
+                selected_sku = st.radio("Select Item:", filtered_sku_list, index=0)
+
+        # --- Main Content Area ---
+        if selected_sku:
+            st.header(f"Analysis for Item: `{selected_sku}`", divider="rainbow")
+            sku_data = reco_df[reco_df['item_id'] == selected_sku].sort_values('forecast_days')
+
+            if sku_data.empty:
+                st.error(f"No data found for the selected item: {selected_sku}")
+            else:
+                # Calculate the overall total forecast for the selected SKU for the 6-month horizon
+                total_forecast = sku_data[sku_data['horizon'] == '6-Month']['total_forecasted_demand'].sum()
+                
+                # Display the overall total forecast
+                st.subheader(f"Overall 6-Month Total Forecast: {total_forecast:,.0f} units", 
+                             help="This is the total forecasted demand across all channels for the selected SKU over the 6-month horizon.")
+
+                # Display the main metrics and charts
+                display_sku_overview(sku_data)
+                st.markdown("<br>", unsafe_allow_html=True)  # Spacer
+                display_demand_chart(sku_data)
+
+                # Display the raw data in a tab
+                with st.expander("📋 View Raw Data"):
+                    st.dataframe(sku_data, use_container_width=True, hide_index=True)
+
+                # Display the chatbot, passing the full dataframe for context
+                display_chatbot(selected_sku, reco_df)
+                
+                # Add a divider before the feedback section
+                st.markdown("---")
+
+                # Display the feedback section
+                capture_feedback(selected_sku, sku_data)
+        else:
+            st.info("Please select an item from the sidebar to see the detailed analysis.", icon="👈")
+else:
+    # 2) “Analyze Data” page: show EDA charts previously saved in the 'eda/' folder
+    st.header("Analyze Data with EDA")
+    st.info("Below are the AutoViz charts saved in the 'eda/' folder:")
+
+    eda_dir = os.path.join(os.path.dirname(__file__), "eda")
+    if not os.path.isdir(eda_dir):
+        st.warning("No 'eda' folder found. Please run your EDA script first.")
+    else:
+        # Display all PNGs in eda/ folder
+        charts = sorted([f for f in os.listdir(eda_dir) if f.endswith(".png")])
+        if not charts:
+            st.warning("No EDA charts found. Please run eda.run_eda_from_mongo(...) to generate them.")
+        else:
+            for chart in charts:
+                chart_path = os.path.join(eda_dir, chart)
+                st.image(chart_path, caption=chart, use_column_width=True)
