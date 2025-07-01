@@ -26,9 +26,9 @@ jobs:
           - 27017:27017
         options: >-
           --health-cmd "mongosh --eval 'db.adminCommand({ ping: 1 })'"
-          --health-interval 60s
-          --health-timeout 20s
-          --health-retries 20
+          --health-interval 30s
+          --health-timeout 10s
+          --health-retries 10
 
     steps:
       # Step 1: Checkout the code
@@ -58,9 +58,13 @@ jobs:
         run: |
           curl -o wait-for-it.sh https://raw.githubusercontent.com/vishnubob/wait-for-it/master/wait-for-it.sh
           chmod +x wait-for-it.sh
-          ./wait-for-it.sh mongodb:27017 --timeout=600 --strict -- echo "MongoDB is up"
+          ./wait-for-it.sh mongodb:27017 --timeout=120 --strict -- echo "MongoDB is up"
 
-      # Step 6: Run the training script
+      # Step 6: Debug MongoDB Logs (Optional)
+      - name: Debug MongoDB Logs
+        run: docker logs $(docker ps -q --filter "name=mongodb")
+
+      # Step 7: Run the training script
       - name: Run training script
         env:
           MONGO_URI: mongodb://root:example@mongodb:27017/
