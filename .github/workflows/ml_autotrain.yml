@@ -50,6 +50,6 @@ jobs:
       # Step 4: Run the training script
       - name: Run training script
         env:
-          MONGO_URI: ${{ secrets.MONGO_URI }}
-          MONGO_DB: ${{ secrets.MONGO_DB }}
-        run: python main.py
+          MONGO_URI: mongodb://mongodb:27017/ # Use the Docker service name
+          MONGO_DB: sales_automl
+        run: python src/main.py
