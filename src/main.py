@@ -97,7 +97,7 @@ def main():
 
     # --- 8. Save Results to MongoDB with check ---
     load_dotenv()
-    MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+    MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:example@localhost:27017/")
     MONGO_DB = os.getenv("MONGO_DB", "sales_automl")
     client = MongoClient(MONGO_URI)
     db = client[MONGO_DB]

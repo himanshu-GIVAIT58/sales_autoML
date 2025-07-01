@@ -5,10 +5,10 @@ on:
     paths:
       - "data/**"
       - "requirements.txt"
-      - "main.py"
-      - "model_handler.py"
-      - "feature_engineering.py"
-      - "data_loader.py"
+      - "src/main.py"
+      - "src/model_handler.py"
+      - "src/feature_engineering.py"
+      - "src/data_loader.py"
       - ".env"
 
   # Trigger on a schedule (monthly on the 1st at midnight UTC)
@@ -25,10 +25,10 @@ jobs:
         ports:
           - 27017:27017
         options: >-
-          --health-cmd "mongo --eval 'db.runCommand({ ping: 1 })'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-cmd "mongosh --eval 'db.adminCommand({ ping: 1 })'"
+          --health-interval 30s
+          --health-timeout 10s
+          --health-retries 10
 
     steps:
       # Step 1: Checkout the code
@@ -50,6 +50,6 @@ jobs:
       # Step 4: Run the training script
       - name: Run training script
         env:
-          MONGO_URI: mongodb://mongodb:27017/ # Use the Docker service name
+          MONGO_URI: mongodb://root:example@mongodb:27017/ # Use the Docker service name
           MONGO_DB: sales_automl
-        run: python -m src.main
+        run: python src/main.py

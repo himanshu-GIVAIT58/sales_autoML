@@ -14,7 +14,7 @@ from data_loader import load_latest_recommendation_data
 
 # --- Load environment variables ---
 load_dotenv()
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:example@localhost:27017/")
 MONGO_DB = os.getenv("MONGO_DB", "sales_automl")
 
 # --- Page Configuration ---

@@ -24,7 +24,7 @@ def log_model_run(
     :param trigger_source: Short description of what triggered this run (manual, pipeline, etc.).
     """
     load_dotenv()
-    client = MongoClient(os.getenv("MONGO_URI", "mongodb://localhost:27017/"))
+    client = MongoClient(os.getenv("MONGO_URI", "mongodb://root:example@localhost:27017/"))
     db = client[os.getenv("MONGO_DB", "sales_automl")]
 
     # (Optional) Retrieve feature importances for analysis
