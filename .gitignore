@@ -8,6 +8,9 @@ venv/
 *.egg-info/
 *.egg
 
+src/eda_data.csv
+eda/
+
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
 
