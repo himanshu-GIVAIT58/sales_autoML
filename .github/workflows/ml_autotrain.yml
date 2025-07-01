@@ -53,6 +53,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r src/requirements.txt
 
+      # Step 5: List running containers
+      - name: List running containers
+        run: docker ps -a
+
       # Step 6: Debug MongoDB Logs (Optional)
       - name: Debug MongoDB Logs
         run: docker logs $(docker ps -q --filter "name=mongodb")
