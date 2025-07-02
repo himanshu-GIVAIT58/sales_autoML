@@ -3,6 +3,7 @@ ORDERING_COST = 20.0
 ANNUAL_HOLDING_COST_PER_UNIT = 3.0
 LEAD_TIME_DAYS = 40
 MINIMUM_ORDER_QUANTITY = 10
+MODEL_SAVE_PATH = "src/autogluon_models/"
 
 # --- ABC Analysis Config ---
 ABC_CONFIG = {
@@ -14,7 +15,7 @@ ABC_CONFIG = {
 }
 
 # --- Model & Data Parameters ---
-MAX_SKUS = 1000
+MAX_SKUS = 10
 PREDICTION_LENGTH = 183
 
 KNOWN_COVARIATES_NAMES = [
@@ -24,9 +25,14 @@ KNOWN_COVARIATES_NAMES = [
     'potential_lost_sales', 'gold_price_change', 'gold_price_ma_7'
 ]
 
+# Column names for TimeSeriesDataFrame
+TIMESTAMP_COL = 'timestamp'
+TARGET_COL = 'target'
+ITEM_ID_COL = 'sku'
+
 # --- AutoGluon Model Training Parameters ---
 AUTOGLUON_PRESETS = "fast_training"
-TIME_LIMIT = 900
+TIME_LIMIT = 180
 NUM_VAL_WINDOWS = 5
 EVAL_METRIC = "MASE"
 FREQ = "D"
