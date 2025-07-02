@@ -1,58 +1,72 @@
+# eda.py
+"""
+This script loads data from MongoDB, processes it, and then runs AutoViz 
+to generate and save exploratory data analysis (EDA) charts.
+"""
+
 import os
 import pandas as pd
 from autoviz.AutoViz_Class import AutoViz_Class
 from dotenv import load_dotenv
 
-# Project modules
-import src.config as config
-import data_loader as data_loader
-import src.feature_engineering as feature_engineering
+# Local project modules
+import config
+import data_loader
+import feature_engineering
+
 
 def run_eda_from_mongo(
     csv_output: str = "eda_data.csv",
     dep_var: str = "target",
-    sep: str = ",",
-    save_folder: str = "eda"
+    save_folder: str = "src/eda",
 ):
-    print("Loading data for EDA...")
-    # 1. Load raw data using our data_loader
-    sales_df, inventory_df, holidays_df = data_loader.load_data(use_mongo=True)
+    """Loads, processes, and runs EDA on the data from MongoDB."""
+    
+    print("🚀 Starting EDA process...")
 
-    # 2. Prepare data via feature_engineering pipeline
-    print("Preparing data with feature_engineering...")
+    # 1. Load raw data using the new data_loader function
+    print("Step 1/4: Loading data from MongoDB...")
+    sales_df = data_loader.load_dataframe_from_mongo("sales_data")
+    inventory_df = data_loader.load_dataframe_from_mongo("query_result")
+    holidays_df = data_loader.load_dataframe_from_mongo("holidays_data")
+
+    # Verify that data was loaded
+    if sales_df.empty or inventory_df.empty:
+        print("⚠️ Error: Sales or inventory data could not be loaded. Aborting EDA.")
+        return
+
+    # 2. Prepare data using the feature_engineering pipeline
+    print("Step 2/4: Preparing data with feature engineering...")
     processed_data, _ = feature_engineering.prepare_data(
         source_data=sales_df,
         inventory_data=inventory_df,
         holidays_data=holidays_df,
-        max_skus=config.MAX_SKUS
+        max_skus=config.MAX_SKUS,
     )
 
-    # Ensure the save_folder exists
-    if not os.path.exists(save_folder):
-        os.makedirs(save_folder, exist_ok=True)
+    # 3. Write processed data to a temporary CSV for AutoViz
+    print(f"Step 3/4: Saving processed data to '{csv_output}'...")
+    os.makedirs(save_folder, exist_ok=True)
+    processed_data.to_csv(csv_output, index=False)
+    print(f"   -> Data saved successfully.")
 
-    # 3. Write processed data to a CSV so AutoViz can read it
-    processed_data.to_csv(csv_output, index=False, sep=sep)
-    print(f"Saved processed data to {os.path.abspath(csv_output)}")
-
-    # 4. Run AutoViz on the CSV
-    print("Running AutoViz for automatic EDA...")
+    # 4. Run AutoViz on the processed data
+    print(f"Step 4/4: Running AutoViz to generate charts...")
     av = AutoViz_Class()
-    df_eda = av.AutoViz(
+    av.AutoViz(
         filename=csv_output,
-        sep=sep,
+        sep=",",
         depVar=dep_var,
         verbose=2,
-        lowess=False,  # Disable LOWESS smoothing for faster performance
-        chart_format="png",  # Save charts as PNG files
-        save_plot_dir=save_folder  # FIX: Changed 'save_dir' to 'save_plot_dir'
+        lowess=False,
+        chart_format="png",
+        save_plot_dir=os.path.abspath(save_folder),
     )
-    print(f"EDA complete. Check the '{save_folder}' folder for charts.")
-    return df_eda
+
+    print(f"✅ EDA complete! Check the '{save_folder}' folder for charts.")
+
 
 if __name__ == "__main__":
-    # Example usage
     load_dotenv()
-    # Use an absolute path for the output CSV to avoid ambiguity
-    eda_csv = os.path.join(os.path.dirname(os.path.abspath(__file__)), "eda_data.csv")
-    analyzed_df = run_eda_from_mongo(csv_output=eda_csv, dep_var="target", sep=",")
+    eda_csv_path = "eda_data.csv"
+    run_eda_from_mongo(csv_output=eda_csv_path, dep_var="target")

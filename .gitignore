@@ -8,9 +8,9 @@ venv/
 *.egg-info/
 *.egg
 
-src/eda_data.csv
+eda_data.csv
 eda/
-
+autogluon_models/
 # Jupyter Notebook checkpoints
 .ipynb_checkpoints/
 
