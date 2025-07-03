@@ -8,112 +8,104 @@ import sys
 from pymongo import MongoClient
 import os
 from dotenv import load_dotenv
+from typing import Optional
 
 # Load environment variables from .env file
 load_dotenv()
 
+# --- Environment Variables ---
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:example@localhost:27017/")
 MONGO_DB = os.getenv("MONGO_DB", "sales_automl")
 
-def save_dataframe_to_mongo(df, collection_name, mongo_uri=MONGO_URI, db_name=MONGO_DB):
-    client = MongoClient(mongo_uri)
-    db = client[db_name]
-    collection = db[collection_name]
-    collection.delete_many({})  # Clear old data
-
-    # Split the DataFrame into smaller chunks (e.g., 1000 rows each) and insert
-    chunk_size = 10000
-    total_rows = len(df)
-    for start in range(0, total_rows, chunk_size):
-        end = start + chunk_size
-        chunk = df.iloc[start:end]
-        if not chunk.empty:
-            collection.insert_many(chunk.to_dict("records"))
-
-    client.close()
-
-def load_dataframe_from_mongo(collection_name, mongo_uri=MONGO_URI, db_name=MONGO_DB):
-    client = MongoClient(mongo_uri)
-    db = client[db_name]
-    collection = db[collection_name]
-    df = pd.DataFrame(list(collection.find()))
-    client.close()
-    if "_id" in df.columns:
-        df = df.drop(columns=["_id"])
-    return df
-
-def get_latest_recommendation_collection(db) -> str:
-    """
-    Fetches the latest inventory recommendation collection based on the timestamp in the collection name.
-    """
-    try:
-        # List all collections in the database
-        collections = db.list_collection_names()
-
-        # Filter collections that start with "inventory_recommendations_"
-        recommendation_collections = [coll for coll in collections if coll.startswith("inventory_recommendations_")]
-
-        # Sort collections by timestamp (assumes the format is "inventory_recommendations_<YYYYMMDD_HHMMSS>")
-        recommendation_collections.sort(reverse=True)  # Latest first
-
-        # Return the latest collection name
-        if recommendation_collections:
-            return recommendation_collections[0]
-        else:
-            print("⚠️ No inventory recommendation collections found in MongoDB.")
-            return 'None'
-    except Exception as e:
-        print(f"⚠️ An error occurred while fetching the latest recommendation collection: {str(e)}")
-        return 'None'
-
-def load_latest_recommendation_data(mongo_uri=MONGO_URI, db_name=MONGO_DB) -> pd.DataFrame:
-    """
-    Loads the latest recommendation data from MongoDB.
-    """
+def save_dataframe_to_mongo(df: pd.DataFrame, collection_name: str, mongo_uri: str = MONGO_URI, db_name: str = MONGO_DB):
+    """Saves a DataFrame to a specified MongoDB collection, clearing old data first."""
     try:
         client = MongoClient(mongo_uri)
         db = client[db_name]
+        collection = db[collection_name]
+        
+        # Clear old data before inserting new data
+        collection.delete_many({})
+        
+        # Insert new data if the DataFrame is not empty
+        if not df.empty:
+            collection.insert_many(df.to_dict("records"))
+        
+        print(f"✅ Successfully saved {len(df)} records to '{collection_name}'.")
 
-        # Get the latest recommendation collection
-        latest_collection = get_latest_recommendation_collection(db)
-        if not latest_collection:
-            return pd.DataFrame()
+    except Exception as e:
+        print(f"⚠️ Error saving data to MongoDB: {e}")
+    finally:
+        if 'client' in locals() and client:
+            client.close()
 
-        # Load data from the latest collection
-        collection = db[latest_collection]
+def load_dataframe_from_mongo(collection_name: str, mongo_uri: str = MONGO_URI, db_name: str = MONGO_DB) -> pd.DataFrame:
+    """Loads a full collection from MongoDB into a pandas DataFrame."""
+    try:
+        client = MongoClient(mongo_uri)
+        db = client[db_name]
+        collection = db[collection_name]
+        
         df = pd.DataFrame(list(collection.find()))
-        client.close()
-
+        
+        # Drop the MongoDB-specific '_id' column if it exists
         if "_id" in df.columns:
             df = df.drop(columns=["_id"])
+            
         return df
+
     except Exception as e:
-        print(f"⚠️ An error occurred while loading the latest recommendation data: {str(e)}")
-        return pd.DataFrame()
+        print(f"⚠️ Error loading data from '{collection_name}': {e}")
+        return pd.DataFrame() # Return an empty DataFrame on error
+    finally:
+        if 'client' in locals() and client:
+            client.close()
 
-def load_data(use_mongo=False):
+def get_latest_recommendation_collection(db) -> Optional[str]:
+    """
+    Finds the latest inventory recommendation collection name.
+    
+    Collection names are expected in the format: "inventory_recommendations_<YYYYMMDD_HHMMSS>"
+    """
     try:
-        if use_mongo:
-            # Use the correct collection names as per your MongoDB
-            sales_data = load_dataframe_from_mongo("sales_data")
-            print(f"Loaded 'sales_data' from MongoDB successfully.")
-            inventory_data = load_dataframe_from_mongo("query_result")
-            print(f"Loaded 'query_result' (inventory) from MongoDB successfully.")
-            holidays_data = load_dataframe_from_mongo("holidays_data")
-            print(f"Loaded 'holidays_data' from MongoDB successfully.")
-        return sales_data, inventory_data, holidays_data
+        collection_names = db.list_collection_names()
+        
+        # Filter for recommendation collections and sort them to find the latest
+        recommendation_collections = sorted(
+            [name for name in collection_names if name.startswith("inventory_recommendations_")],
+            reverse=True
+        )
+        
+        if recommendation_collections:
+            print(f"🔍 Found latest collection: '{recommendation_collections[0]}'")
+            return recommendation_collections[0]
+        else:
+            print("⚠️ No inventory recommendation collections found.")
+            return None # Return None object, not the string 'None'
 
-    except FileNotFoundError as e:
-        print(f"Error: A required file was not found: {e.filename}")
-        print("Please ensure all data files are in the correct directory.")
-        sys.exit(1) # Exit the script with an error code
+    except Exception as e:
+        print(f"⚠️ Error fetching latest collection name: {e}")
+        return None
 
-    df_eda = sales_data.copy()
-    df_eda["order_date"] = pd.to_datetime(df_eda["order_date"])
-    df_eda["year"] = df_eda["order_date"].dt.year
-    df_eda["month"] = df_eda["order_date"].dt.month
-    df_eda["day"] = df_eda["order_date"].dt.day
-    df_eda["day_of_week"] = df_eda["order_date"].dt.day_name()
+def load_latest_recommendation_data(mongo_uri: str = MONGO_URI, db_name: str = MONGO_DB) -> pd.DataFrame:
+    """Loads data from the most recent recommendation collection in MongoDB."""
+    try:
+        client = MongoClient(mongo_uri)
+        db = client[db_name]
+        
+        latest_collection_name = get_latest_recommendation_collection(db)
+        
+        # If no collection was found, return an empty DataFrame
+        if not latest_collection_name:
+            return pd.DataFrame()
+            
+        # Load data from the identified collection
+        df = load_dataframe_from_mongo(latest_collection_name, mongo_uri, db_name)
+        return df
 
-    return df_eda
-
+    except Exception as e:
+        print(f"⚠️ An error occurred while loading the latest recommendation data: {e}")
+        return pd.DataFrame()
+    finally:
+        if 'client' in locals() and client:
+            client.close()
