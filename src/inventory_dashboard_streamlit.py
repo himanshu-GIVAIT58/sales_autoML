@@ -1,21 +1,25 @@
 # --- Imports ---
 import streamlit as st
 import pandas as pd
-import altair as alt
-from typing import Optional, Dict, Any, List
-import os
-from io import StringIO
-import numpy as np
 from datetime import datetime
+import os
+import altair as alt
 from dateutil.relativedelta import relativedelta
+
+# Fix relative imports to absolute imports
+from model_handler import make_predictions, load_latest_predictor
 from pymongo import MongoClient
 from dotenv import load_dotenv
-from data_loader import load_latest_recommendation_data
+from data_loader import load_latest_recommendation_data, load_dataframe_from_mongo
+from typing import Optional
 
 # --- Load environment variables ---
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:example@localhost:27017/")
 MONGO_DB = os.getenv("MONGO_DB", "sales_automl")
+
+MODEL_SAVE_PATH = "./autogluon_models/"
+EDA_DIR = "./eda/target/"  # Updated path to match the actual structure
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -43,12 +47,16 @@ def load_recommendation_data_from_mongo() -> Optional[pd.DataFrame]:
 
 # --- MongoDB Feedback Save ---
 def save_feedback_to_mongo(feedback_df: pd.DataFrame, collection_name="feedback_data", mongo_uri=MONGO_URI, db_name=MONGO_DB):
+    """
+    Saves feedback data to MongoDB.
+    """
     try:
         client = MongoClient(mongo_uri)
         db = client[db_name]
         collection = db[collection_name]
         collection.insert_many(feedback_df.to_dict("records"))
         client.close()
+        st.success("Thank you for your feedback! It has been recorded.")
     except Exception as e:
         st.error(f"⚠️ Could not save feedback to MongoDB: {str(e)}", icon="🚨")
 
@@ -193,7 +201,7 @@ def save_feedback(selected_sku: str, sku_data: pd.DataFrame, feedback: str):
     """Saves the user feedback to MongoDB."""
     # Prepare the data to be saved
     feedback_records = []
-    for index, row in sku_data.iterrows():
+    for _, row in sku_data.iterrows():
         feedback_records.append({
             "timestamp": datetime.now(),
             "selected_sku": selected_sku,
@@ -234,7 +242,7 @@ st.title('📦 Inventory Recommendations Dashboard')
 
 # 1) Create a radio button in the sidebar to select a page
 st.sidebar.title("Navigation")
-page = st.sidebar.radio("Go to:", ["Recommendations", "Analyze Data"])
+page = st.sidebar.radio("Go to:", ["Recommendations", "Analyze Data", "New SKU Forecast"])
 
 if page == "Recommendations":
     # --- Main Content: Recommendations ---
@@ -268,46 +276,99 @@ if page == "Recommendations":
             if sku_data.empty:
                 st.error(f"No data found for the selected item: {selected_sku}")
             else:
-                # Calculate the overall total forecast for the selected SKU for the 6-month horizon
-                total_forecast = sku_data[sku_data['horizon'] == '6-Month']['total_forecasted_demand'].sum()
-                
-                # Display the overall total forecast
-                st.subheader(f"Overall 6-Month Total Forecast: {total_forecast:,.0f} units", 
-                             help="This is the total forecasted demand across all channels for the selected SKU over the 6-month horizon.")
-
-                # Display the main metrics and charts
+                st.subheader(f"Overall 6-Month Total Forecast: {sku_data[sku_data['horizon'] == '6-Month']['total_forecasted_demand'].sum():,.0f} units")
                 display_sku_overview(sku_data)
-                st.markdown("<br>", unsafe_allow_html=True)  # Spacer
                 display_demand_chart(sku_data)
 
-                # Display the raw data in a tab
                 with st.expander("📋 View Raw Data"):
                     st.dataframe(sku_data, use_container_width=True, hide_index=True)
 
-                # Display the chatbot, passing the full dataframe for context
                 display_chatbot(selected_sku, reco_df)
-                
-                # Add a divider before the feedback section
                 st.markdown("---")
-
-                # Display the feedback section
                 capture_feedback(selected_sku, sku_data)
         else:
             st.info("Please select an item from the sidebar to see the detailed analysis.", icon="👈")
-else:
-    # 2) “Analyze Data” page: show EDA charts previously saved in the 'eda/' folder
-    st.header("Analyze Data with EDA")
-    st.info("Below are the AutoViz charts saved in the 'eda/' folder:")
 
-    eda_dir = os.path.join(os.path.dirname(__file__), "eda")
-    if not os.path.isdir(eda_dir):
-        st.warning("No 'eda' folder found. Please run your EDA script first.")
+elif page == "Analyze Data":
+    st.header("Analyze Data with EDA")
+    if not os.path.isdir(EDA_DIR):
+        os.makedirs(EDA_DIR, exist_ok=True)
+        st.warning(f"Created EDA directory at: {EDA_DIR}")
+        st.info("Please run the EDA script to generate charts.")
     else:
-        # Display all PNGs in eda/ folder
-        charts = sorted([f for f in os.listdir(eda_dir) if f.endswith(".png")])
+        charts = sorted([f for f in os.listdir(EDA_DIR) if f.endswith(".png")])
         if not charts:
-            st.warning("No EDA charts found. Please run eda.run_eda_from_mongo(...) to generate them.")
+            st.warning("No PNG charts found in the EDA directory. Please run the EDA script first.")
         else:
             for chart in charts:
-                chart_path = os.path.join(eda_dir, chart)
-                st.image(chart_path, caption=chart, use_column_width=True)
+                chart_path = os.path.join(EDA_DIR, chart)
+                try:
+                    st.image(chart_path, caption=chart, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Failed to load chart {chart}: {str(e)}")
+
+elif page == "New SKU Forecast":
+    st.subheader("📤 Upload Data for New SKU Forecasting")
+
+    st.info("""
+    **Required CSV format:**
+    - `sku`: Product identifier
+    - `timestamp`: Date (e.g., `2025-07-02` or `2025-07-02T02:54:20+05:30`)
+    - `target`: Sales quantity (numeric)
+    - `disc`: Discount percentage (numeric, e.g., `10.5`)
+    """)
+
+    uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
+
+    if uploaded_file:
+        try:
+            user_data = pd.read_csv(uploaded_file)
+            st.write("Uploaded Data Preview:")
+            st.dataframe(user_data.head())
+
+            required_columns = ["sku", "timestamp", "target", "disc"]
+            if not all(col in user_data.columns for col in required_columns):
+                st.error(f"Missing required columns. Please ensure your CSV has: {required_columns}")
+            else:
+                with st.spinner("Processing data and generating forecast..."):
+                    try:
+                        # Standardize timestamp format
+                        user_data["timestamp"] = pd.to_datetime(user_data["timestamp"], format='mixed', utc=True).dt.tz_localize(None)
+
+                        # Load forecasting model
+                        predictor = load_latest_predictor(MODEL_SAVE_PATH)
+                        if predictor is None:
+                            st.error("🚨 Could not load pre-trained model. Please check the path and ensure it's available.")
+                            st.stop()
+
+                        # --- FIX STARTS HERE: Load and process holidays data ---
+                        holidays_df = pd.DataFrame(columns=['timestamp', 'is_holiday']) # Default empty DF
+                        try:
+                            holidays_from_db = load_dataframe_from_mongo("holidays_data")
+                            if not holidays_from_db.empty and 'Date' in holidays_from_db.columns:
+                                holidays_df['timestamp'] = pd.to_datetime(holidays_from_db['Date'], format='mixed', utc=True).dt.tz_localize(None)
+                                holidays_df['is_holiday'] = 1
+                                holidays_df = holidays_df[['timestamp', 'is_holiday']].drop_duplicates()
+                            else:
+                                st.warning("Holiday data not found or is empty in MongoDB. Proceeding without it.")
+                        except Exception as e:
+                            st.warning(f"Could not load holiday data: {e}. Proceeding without it.")
+                        # --- FIX ENDS HERE ---
+
+                        # Generate predictions
+                        predictions = make_predictions(
+                            predictor=predictor,
+                            user_uploaded_data=user_data,
+                            holidays_df=holidays_df
+                        )
+
+                        st.success("✅ Forecasts generated successfully!")
+                        st.dataframe(predictions)
+
+                    except Exception as e:
+                        st.error(f"Error during forecast generation: {str(e)}")
+                        st.info("Please check model configuration and data formats.")
+
+        except Exception as e:
+            st.error(f"Error reading the uploaded file: {str(e)}")
+            st.info("Please ensure your CSV file is properly formatted and not corrupt.")
