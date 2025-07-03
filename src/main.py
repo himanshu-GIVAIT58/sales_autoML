@@ -13,12 +13,12 @@ from autogluon.timeseries import TimeSeriesDataFrame
 import joblib
 
 # Import project modules
-from . import config
-from . import data_loader
-from . import feature_engineering
-from . import model_handler
-from . import inventory_calculator
-from . import model_monitor
+from src import config
+from src import data_loader
+from src import feature_engineering
+from src import model_handler
+from src import inventory_calculator
+from src import model_monitor
 
 def main():
     """Main function to run the entire pipeline."""
@@ -102,16 +102,16 @@ def main():
 
     # --- 6. Save Training Artifacts for Fast Predictions ---
     print("\nStep 6: Saving training artifacts for fast prediction...")
-    os.makedirs('artifacts', exist_ok=True)
+    os.makedirs(config.ARTIFACTS_PATH, exist_ok=True)
     static_feature_columns = list(final_static_features.drop(columns=['item_id']).columns)
-    joblib.dump(static_feature_columns, 'artifacts/static_feature_columns.joblib')
+    joblib.dump(static_feature_columns, os.path.join(config.ARTIFACTS_PATH, 'static_feature_columns.joblib'))
     print("   -> Saved static feature columns.")
 
     holidays_df_for_future = data_loader.load_dataframe_from_mongo("holidays_data")
     holidays_df_for_future.rename(columns={'Date': 'timestamp'}, inplace=True)
     holidays_df_for_future['timestamp'] = pd.to_datetime(holidays_df_for_future['timestamp'].astype(str).str.split('T').str[0])
     holidays_df_for_future['is_holiday'] = 1
-    holidays_df_for_future.drop_duplicates(subset=['timestamp']).to_csv('artifacts/holidays.csv', index=False)
+    holidays_df_for_future.drop_duplicates(subset=['timestamp']).to_csv(os.path.join(config.ARTIFACTS_PATH, 'holidays.csv'), index=False)
     print("   -> Saved holidays data.")
 
     # --- 7. Generate Predictions for the Main Batch ---

@@ -7,19 +7,16 @@ import altair as alt
 from dateutil.relativedelta import relativedelta
 
 # Fix relative imports to absolute imports
-from model_handler import make_predictions, load_latest_predictor
+from src.model_handler import make_fast_predictions, load_latest_predictor
 from pymongo import MongoClient
 from dotenv import load_dotenv
-from data_loader import load_latest_recommendation_data, load_dataframe_from_mongo
+from src.data_loader import load_latest_recommendation_data, load_dataframe_from_mongo
 from typing import Optional
-
+from src import config
 # --- Load environment variables ---
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:example@localhost:27017/")
 MONGO_DB = os.getenv("MONGO_DB", "sales_automl")
-
-MODEL_SAVE_PATH = "./autogluon_models/"
-EDA_DIR = "./eda/target/"  # Updated path to match the actual structure
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -28,7 +25,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
 
 # --- Data Loading ---
 def load_recommendation_data_from_mongo() -> Optional[pd.DataFrame]:
@@ -291,31 +287,33 @@ if page == "Recommendations":
 
 elif page == "Analyze Data":
     st.header("Analyze Data with EDA")
-    if not os.path.isdir(EDA_DIR):
-        os.makedirs(EDA_DIR, exist_ok=True)
-        st.warning(f"Created EDA directory at: {EDA_DIR}")
+    # --- KEY FIX: Use the absolute path from the config file ---
+    eda_dir = os.path.join(config.PROJECT_SRC, "eda", "target")
+    if not os.path.isdir(eda_dir):
+        os.makedirs(eda_dir, exist_ok=True)
+        st.warning(f"Created EDA directory at: {eda_dir}")
         st.info("Please run the EDA script to generate charts.")
     else:
-        charts = sorted([f for f in os.listdir(EDA_DIR) if f.endswith(".png")])
+        charts = sorted([f for f in os.listdir(eda_dir) if f.endswith(".png")])
         if not charts:
             st.warning("No PNG charts found in the EDA directory. Please run the EDA script first.")
         else:
             for chart in charts:
-                chart_path = os.path.join(EDA_DIR, chart)
+                chart_path = os.path.join(eda_dir, chart)
                 try:
                     st.image(chart_path, caption=chart, use_container_width=True)
                 except Exception as e:
                     st.error(f"Failed to load chart {chart}: {str(e)}")
 
 elif page == "New SKU Forecast":
-    st.subheader("📤 Upload Data for New SKU Forecasting")
+    st.header("📤 Forecast on New Data")
 
     st.info("""
     **Required CSV format:**
-    - `sku`: Product identifier
-    - `timestamp`: Date (e.g., `2025-07-02` or `2025-07-02T02:54:20+05:30`)
+    - `sku`: Product identifier (e.g., A0215)
+    - `timestamp`: Date (e.g., `2025-07-02`)
     - `target`: Sales quantity (numeric)
-    - `disc`: Discount percentage (numeric, e.g., `10.5`)
+    - `disc`: Discount percentage (numeric)
     """)
 
     uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
@@ -330,44 +328,42 @@ elif page == "New SKU Forecast":
             if not all(col in user_data.columns for col in required_columns):
                 st.error(f"Missing required columns. Please ensure your CSV has: {required_columns}")
             else:
-                with st.spinner("Processing data and generating forecast..."):
+                with st.spinner("🚀 Evaluating performance and generating forecast..."):
                     try:
-                        # Standardize timestamp format
-                        user_data["timestamp"] = pd.to_datetime(user_data["timestamp"], format='mixed', utc=True).dt.tz_localize(None)
-
-                        # Load forecasting model
-                        predictor = load_latest_predictor(MODEL_SAVE_PATH)
+                        # 1. Load the latest forecasting model
+                        predictor = load_latest_predictor()
                         if predictor is None:
-                            st.error("🚨 Could not load pre-trained model. Please check the path and ensure it's available.")
+                            st.error("🚨 Could not load a trained model. Please run the main training pipeline first.")
                             st.stop()
 
-                        # --- FIX STARTS HERE: Load and process holidays data ---
-                        holidays_df = pd.DataFrame(columns=['timestamp', 'is_holiday']) # Default empty DF
-                        try:
-                            holidays_from_db = load_dataframe_from_mongo("holidays_data")
-                            if not holidays_from_db.empty and 'Date' in holidays_from_db.columns:
-                                holidays_df['timestamp'] = pd.to_datetime(holidays_from_db['Date'], format='mixed', utc=True).dt.tz_localize(None)
-                                holidays_df['is_holiday'] = 1
-                                holidays_df = holidays_df[['timestamp', 'is_holiday']].drop_duplicates()
-                            else:
-                                st.warning("Holiday data not found or is empty in MongoDB. Proceeding without it.")
-                        except Exception as e:
-                            st.warning(f"Could not load holiday data: {e}. Proceeding without it.")
-                        # --- FIX ENDS HERE ---
-
-                        # Generate predictions
-                        predictions = make_predictions(
+                        # 2. Call the function to get both predictions and metrics
+                        predictions, metrics = make_fast_predictions(
                             predictor=predictor,
-                            user_uploaded_data=user_data,
-                            holidays_df=holidays_df
+                            user_uploaded_data=user_data
                         )
 
-                        st.success("✅ Forecasts generated successfully!")
+                        st.success("✅ Forecasts and performance metrics generated successfully!")
+
+                        # 3. Display the performance metrics first
+                        st.subheader("Performance on Uploaded Data (Backtest)")
+                        st.dataframe(metrics)
+                        st.caption("Lower values for MASE, RMSE, and MAPE are better. A MASE score below 1.0 generally indicates that the model is performing better than a naive seasonal forecast.")
+
+                        # 4. Display the future forecast
+                        st.subheader("Future Forecast")
                         st.dataframe(predictions)
+
+                        # 5. Add a download button for the forecast results
+                        st.download_button(
+                           label="Download Forecast Data (CSV)",
+                           data=predictions.to_csv(index=True).encode('utf-8'), # Save with index
+                           file_name='forecast_results.csv',
+                           mime='text/csv',
+                        )
 
                     except Exception as e:
                         st.error(f"Error during forecast generation: {str(e)}")
-                        st.info("Please check model configuration and data formats.")
+                        st.info("Please check that artifacts from the last training run exist and the data format is correct.")
 
         except Exception as e:
             st.error(f"Error reading the uploaded file: {str(e)}")
