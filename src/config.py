@@ -1,9 +1,18 @@
 # --- Cost & Inventory Parameters ---
+import os 
+
 ORDERING_COST = 20.0
 ANNUAL_HOLDING_COST_PER_UNIT = 3.0
 LEAD_TIME_DAYS = 40
 MINIMUM_ORDER_QUANTITY = 10
-MODEL_SAVE_PATH = "src/autogluon_models/"
+# MODEL_SAVE_PATH = "src/autogluon_models/"
+
+PROJECT_ROOT = "/app"
+PROJECT_SRC = os.path.join(PROJECT_ROOT, "src")
+
+# Define absolute paths for models and artifacts
+MODEL_SAVE_PATH = os.path.join(PROJECT_SRC, "autogluon_models")
+ARTIFACTS_PATH = os.path.join(PROJECT_ROOT, "artifacts")
 
 # --- ABC Analysis Config ---
 ABC_CONFIG = {
@@ -16,7 +25,7 @@ ABC_CONFIG = {
 
 # --- Model & Data Parameters ---
 MAX_SKUS = 1000
-PREDICTION_LENGTH = 183
+PREDICTION_LENGTH = 30
 
 KNOWN_COVARIATES_NAMES = [
     'was_stocked_out', 'is_holiday', 'is_on_promotion', 'month', 'day_of_week',

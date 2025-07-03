@@ -60,8 +60,6 @@ def generate_static_features(df: pd.DataFrame, all_training_columns: List[str] =
         static_features_df = static_features_df.reindex(columns=all_training_columns, fill_value=0)
     return static_features_df
 
-# --- Main Data Preparation Pipeline (Corrected) ---
-
 def prepare_data(source_data: pd.DataFrame, inventory_data: pd.DataFrame, holidays_data: pd.DataFrame, max_skus: int = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Executes the full data preparation and feature engineering pipeline."""
     print("\nPreparing and regularizing data...")

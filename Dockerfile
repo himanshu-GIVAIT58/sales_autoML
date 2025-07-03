@@ -1,28 +1,30 @@
 # Use an official Python image as the base image
 FROM python:3.11-slim
 
-# Set the working directory inside the container
+# Set the working directory for all subsequent commands
 WORKDIR /app
 
-# Create necessary directories
-RUN mkdir -p src/eda src/autogluon_models
+# 1. Copy only the requirements file first to leverage Docker layer caching.
+#    This step is now separate and placed before copying all other code.
+COPY src/requirements.txt src/requirements.txt
 
-# Copy the requirements file into the container
-COPY src/requirements.txt .
+# 2. Install Python dependencies.
+#    This layer will only be re-built if the requirements.txt file changes.
+RUN pip install --no-cache-dir -r src/requirements.txt
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy the application code and models into the container
+# 3. Now, copy the rest of your application code and environment file.
+#    This maintains your desired /app/src/... structure.
 COPY src/ src/
 COPY .env .
-
-# Set environment variables for Streamlit
+ENV PYTHONPATH /app
+# Set environment variables for Streamlit and Python
 ENV STREAMLIT_SERVER_PORT=8501
 ENV STREAMLIT_SERVER_ADDRESS=0.0.0.0
+ENV PYTHONUNBUFFERED=1
 
-# Expose the port for Streamlit (default is 8501)
+# Expose the port that Streamlit runs on
 EXPOSE 8501
 
-# Run the Streamlit app
-CMD ["streamlit", "run", "inventory_dashboard_streamlit.py"]
+# 4. The command to run when the container starts.
+#    This path is correct for your specified structure.
+CMD ["streamlit", "run", "src/inventory_dashboard_streamlit.py"]
