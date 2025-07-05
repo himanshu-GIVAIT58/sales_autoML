@@ -6,8 +6,8 @@ import os
 import altair as alt
 from dateutil.relativedelta import relativedelta
 
-
-from src.model_handler import make_fast_predictions, prepare_prediction_data,load_latest_predictor,generate_future_covariates,generate_static_features,load_prediction_artifacts
+from src.promo_analyzer import analyze_promotion_lift
+from src.model_handler import  prepare_prediction_data,load_latest_predictor,generate_future_covariates,generate_static_features,load_prediction_artifacts
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from src.data_loader import load_latest_recommendation_data, load_dataframe_from_mongo
@@ -238,7 +238,7 @@ st.title('📦 Inventory Recommendations Dashboard')
 
 
 st.sidebar.title("Navigation")
-page = st.sidebar.radio("Go to:", ["Recommendations", "Analyze Data", "New SKU Forecast"])
+page = st.sidebar.radio("Go to:", ["Recommendations", "Analyze Data", "New SKU Forecast","Promotion Analysis"])
 
 if page == "Recommendations":
     
@@ -390,7 +390,7 @@ elif page == "New SKU Forecast":
                 # --- Display Results ---
                 st.subheader("Performance on Uploaded Data (Backtest)")
                 st.dataframe(metrics)
-                
+
                 st.subheader("Future Forecast")
                 st.dataframe(predictions)
 
@@ -403,3 +403,49 @@ elif page == "New SKU Forecast":
 
         except Exception as e:
             st.error(f"Error reading the uploaded file: {str(e)}")
+
+elif page == "Promotion Analysis":
+    st.header("🔬 Promotion Effectiveness Analysis")
+    
+    lookback_days = st.slider(
+        "Select analysis period (days):", 
+        min_value=184, 
+        max_value=365, 
+        value=200, 
+        step=7
+    )
+
+    if st.button("🚀 Run Analysis", use_container_width=True):
+        with st.spinner("Analyzing promotion performance... This may take a moment."):
+            try:
+                predictor = load_latest_predictor()
+                if predictor is None:
+                    st.error("🚨 Could not load a trained model. Please run the main training pipeline first.")
+                    st.stop()
+                
+                lift_summary_df = analyze_promotion_lift(predictor, lookback_days)
+
+                if lift_summary_df.empty:
+                    st.warning("No promotion data was found in the selected period to analyze.")
+                else:
+                    st.subheader("Promotion Performance Summary")
+                    st.caption(f"Comparing actual sales vs. forecasted sales without promotions over the last {lookback_days} days.")
+                    
+                    # Display metrics
+                    st.dataframe(lift_summary_df,
+                        column_config={
+                            "total_actual_sales": st.column_config.NumberColumn("Actual Sales", format="%d units"),
+                            "total_forecasted_sales_no_promo": st.column_config.NumberColumn("Est. Sales w/o Promo", format="%d units"),
+                            "total_lift_units": st.column_config.NumberColumn("Sales Lift (Units)", format="%d"),
+                            "percentage_lift": st.column_config.ProgressColumn(
+                                "Sales Lift (%)",
+                                help="The percentage increase in sales attributable to promotions.",
+                                format="%.2f%%",
+                                min_value=lift_summary_df['percentage_lift'].min(),
+                                max_value=lift_summary_df['percentage_lift'].max(),
+                            ),
+                        },
+                        use_container_width=True
+                    )
+            except Exception as e:
+                st.error(f"An error occurred during analysis: {e}")

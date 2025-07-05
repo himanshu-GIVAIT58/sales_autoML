@@ -143,3 +143,63 @@ def prepare_data(source_data: pd.DataFrame, inventory_data: pd.DataFrame, holida
     
     print("Data preparation and feature engineering complete.")
     return regularized_data, static_features_df
+
+def prepare_data_for_analysis(source_data: pd.DataFrame, holidays_data: pd.DataFrame, max_skus: int = None) -> pd.DataFrame:
+    """
+    Prepares a clean, regularized dataset specifically for analysis,
+    ensuring all necessary columns like 'disc' are preserved.
+    """
+    print("\nPreparing data for analysis...")
+
+    # 1. Filter to top SKUs if specified
+    if max_skus is not None:
+        sku_sales_totals = source_data.groupby('sku')['qty'].sum().sort_values(ascending=False)
+        top_n_skus = sku_sales_totals.nlargest(max_skus).index
+        source_data = source_data[source_data["sku"].isin(top_n_skus)].copy()
+
+    # 2. Clean and prepare base dataframes
+    sales_df = source_data[['created_at', 'sku', 'qty', 'category', 'gender', 'disc', 'Channel']].copy()
+    sales_df.rename(columns={"created_at": "timestamp", "qty": "target"}, inplace=True)
+    sales_df["timestamp"] = pd.to_datetime(sales_df["timestamp"], dayfirst=True, errors='coerce').dropna()
+    sales_df["target"] = pd.to_numeric(sales_df["target"], errors='coerce').fillna(0)
+    sales_df["disc"] = pd.to_numeric(sales_df["disc"], errors='coerce').fillna(0)
+
+    # 3. Engineer Core Features
+    df = create_seasonal_features(sales_df)
+    df = create_price_elasticity_features(df)
+    df['item_id'] = df['sku'].astype(str) + "_" + df.get('channel', 'Unknown').astype(str)
+
+    # 4. Aggregate to daily level, ensuring 'disc' is kept
+    agg_dict = {
+        'target': 'sum',
+        'disc': 'mean', # Use the average daily discount
+        'is_on_promotion': 'max', # If it was on promo at all during the day, flag it
+        'is_high_discount': 'max'
+    }
+    df_daily = df.groupby(["item_id", "sku", "timestamp"]).agg(agg_dict).reset_index()
+
+    # 5. Regularize time series
+    all_items = df_daily["item_id"].unique()
+    date_range = pd.date_range(start=df_daily["timestamp"].min(), end=df_daily["timestamp"].max(), freq='D')
+    multi_index = pd.MultiIndex.from_product([all_items, date_range], names=["item_id", "timestamp"])
+    regularized_data = pd.DataFrame(index=multi_index).reset_index()
+    regularized_data = pd.merge(regularized_data, df_daily, on=["item_id", "timestamp"], how="left")
+    
+    # 6. Final Data Filling
+    id_to_sku_map = df[['item_id', 'sku']].drop_duplicates()
+    regularized_data = pd.merge(regularized_data, id_to_sku_map, on='item_id', how='left')
+    
+    holidays_df = holidays_data[['Date']].copy()
+    holidays_df.rename(columns={'Date': 'timestamp'}, inplace=True)
+    holidays_df['timestamp'] = pd.to_datetime(holidays_df['timestamp'].astype(str).str.split('T').str[0])
+    holidays_df['is_holiday'] = 1
+    
+    regularized_data = pd.merge(regularized_data, holidays_df, on="timestamp", how="left")
+    
+    # Forward-fill all columns except the target and discount
+    ffill_cols = [col for col in regularized_data.columns if col not in ['target', 'disc']]
+    regularized_data[ffill_cols] = regularized_data.groupby('item_id')[ffill_cols].transform(lambda x: x.ffill().bfill())
+    regularized_data.fillna(0, inplace=True)
+    
+    print("✅ Analysis data preparation complete.")
+    return regularized_data

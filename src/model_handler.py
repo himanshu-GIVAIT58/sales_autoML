@@ -39,7 +39,7 @@ def train_predictor(ts_data, config):
             presets=config.AUTOGLUON_PRESETS,
             time_limit=config.TIME_LIMIT,
             num_val_windows=config.NUM_VAL_WINDOWS,
-            excluded_model_types=['DirectTabular']
+
         )
 
         print("Model training completed.")
