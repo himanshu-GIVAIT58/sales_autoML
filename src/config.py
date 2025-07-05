@@ -30,7 +30,12 @@ KNOWN_COVARIATES_NAMES = [
     'was_stocked_out', 'is_holiday', 'is_on_promotion', 'month', 'day_of_week',
     'is_weekend', 'is_wedding_season', 'is_diwali_period', 'is_valentine_month',
     'is_high_discount', 'sales_ma_7', 'sales_ma_14', 'stockout_days_last_7',
-    'potential_lost_sales', 'gold_price_change', 'gold_price_ma_7'
+    'potential_lost_sales', 'gold_price_change', 'gold_price_ma_7',
+     'sales_lag_1',
+    'sales_lag_7',
+    'sales_lag_14',
+    'sales_std_7',
+    'sales_std_30'
 ]
 
 # Column names for TimeSeriesDataFrame
