@@ -200,11 +200,11 @@ def make_fast_predictions(predictor, user_uploaded_data):
     if predictor is None:
         raise ValueError("A trained predictor object must be provided.")
 
-    
+    # 1. Load artifacts and prepare data
     static_feature_columns, holidays_df = load_prediction_artifacts()
     enriched_data = prepare_prediction_data(user_uploaded_data, holidays_df)
 
-    
+    # 2. Create TimeSeriesDataFrame
     enriched_data['channel'] = 'Online'
     enriched_data['item_id'] = enriched_data['sku'].astype(str) + "_" + enriched_data['channel']
     static_features = generate_static_features(enriched_data, all_training_columns=static_feature_columns)
@@ -216,18 +216,21 @@ def make_fast_predictions(predictor, user_uploaded_data):
         static_features_df=static_features
     )
 
-    
+    # 3. Evaluate performance (with safety check)
     metrics = None
     min_series_length = ts_upload.index.get_level_values('item_id').value_counts().min()
+    
     if min_series_length > predictor.prediction_length:
         print("  -> Data is long enough. Evaluating model performance...")
-        metrics, _ = predictor.evaluate(ts_upload, display=False)
+        # --- KEY FIX ---
+        # Assign the direct output of evaluate() to metrics, without unpacking.
+        metrics = predictor.evaluate(ts_upload, display=False)
     else:
         print(f"  -> Data is too short to evaluate. Skipping evaluation.")
         reason = f"Uploaded data history ({min_series_length} points) is not longer than the model's prediction length ({predictor.prediction_length} points)."
         metrics = pd.DataFrame([{"info": "Evaluation skipped", "reason": reason}])
 
-    
+    # 4. Generate future forecast
     future_known_covariates = generate_future_covariates(predictor, ts_upload, holidays_df)
     predictions = predictor.predict(
         ts_upload,
