@@ -1,4 +1,4 @@
-# --- Imports ---
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -6,19 +6,20 @@ import os
 import altair as alt
 from dateutil.relativedelta import relativedelta
 
-# Fix relative imports to absolute imports
-from src.model_handler import make_fast_predictions, load_latest_predictor
+
+from src.model_handler import make_fast_predictions, prepare_prediction_data,load_latest_predictor,generate_future_covariates,generate_static_features,load_prediction_artifacts
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from src.data_loader import load_latest_recommendation_data, load_dataframe_from_mongo
 from typing import Optional
-from src import config
-# --- Load environment variables ---
+from src import config 
+from autogluon.timeseries import TimeSeriesDataFrame  
+
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:example@localhost:27017/")
 MONGO_DB = os.getenv("MONGO_DB", "sales_automl")
 
-# --- Page Configuration ---
+
 st.set_page_config(
     page_title="Inventory Recommendations Dashboard",
     page_icon="📦",
@@ -26,7 +27,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Data Loading ---
+
 def load_recommendation_data_from_mongo() -> Optional[pd.DataFrame]:
     """
     Loads the latest inventory recommendations from MongoDB using data_loader.
@@ -41,7 +42,7 @@ def load_recommendation_data_from_mongo() -> Optional[pd.DataFrame]:
         st.error(f"⚠️ An error occurred while loading the latest recommendations: {str(e)}", icon="🚨")
         return None
 
-# --- MongoDB Feedback Save ---
+
 def save_feedback_to_mongo(feedback_df: pd.DataFrame, collection_name="feedback_data", mongo_uri=MONGO_URI, db_name=MONGO_DB):
     """
     Saves feedback data to MongoDB.
@@ -52,23 +53,22 @@ def save_feedback_to_mongo(feedback_df: pd.DataFrame, collection_name="feedback_
         collection = db[collection_name]
         collection.insert_many(feedback_df.to_dict("records"))
         client.close()
-        st.success("Thank you for your feedback! It has been recorded.")
     except Exception as e:
         st.error(f"⚠️ Could not save feedback to MongoDB: {str(e)}", icon="🚨")
 
-# --- UI Helper Functions ---
+
 def display_sku_overview(sku_data: pd.DataFrame) -> None:
     """Displays the key recommendation metrics for a selected SKU across all horizons."""
     st.subheader("Forecast Horizons & Recommendations", divider="blue")
 
-    # Create a metric card for each forecast horizon
+    
     channel_order = ['App', 'Web', 'Offline']
     ordered_data = sku_data[sku_data['channel'].isin(channel_order)].sort_values(by='channel', key=lambda x: x.map({channel: i for i, channel in enumerate(channel_order)}))
 
     num_metrics = len(ordered_data)
-    cols = st.columns(3)  # Create 3 equal-width columns
+    cols = st.columns(3)  
     for i, (index, row) in enumerate(ordered_data.iterrows()):
-        with cols[i % 3]:  # Use modulo to cycle through the columns
+        with cols[i % 3]:  
             st.metric(
                 label=f"**{row['horizon']} Forecast** ({row['forecast_days']} days) - **Channel:** `{row['channel']}`",
                 value=f"{row['total_forecasted_demand']:,.0f} units"
@@ -81,14 +81,14 @@ def display_demand_chart(sku_data: pd.DataFrame) -> None:
     """Visualizes the total forecasted demand across different horizons."""
     st.subheader("Demand Forecast Comparison", divider="gray")
 
-    # Create two columns for side-by-side layout
+    
     col1, col2 = st.columns(2)
 
-    # Current Demand Bar Chart (Aggregated by Horizon)
+    
     with col1:
-        st.markdown("### Total Demand by Horizon")
+        st.markdown("**Total Demand by Forecast Horizon**")
         
-        # Aggregate data by horizon
+        
         agg_sku_data = sku_data.groupby('horizon')['total_forecasted_demand'].sum().reset_index()
 
         current_chart = alt.Chart(agg_sku_data).mark_bar(
@@ -113,38 +113,38 @@ def display_demand_chart(sku_data: pd.DataFrame) -> None:
         )
         st.altair_chart(current_chart, use_container_width=True)
 
-    # Corrected Forecasted Demand Chart for the Next 6 Months
+    
     with col2:
-        st.markdown("### Implied Monthly Demand for Next 6 Months")
+        st.markdown("**Implied Monthly Demand for Next 6 Months**")
         
-        # Aggregate the total demand per horizon
+        
         demand_by_horizon = sku_data.groupby('horizon')['total_forecasted_demand'].sum()
 
         d1 = demand_by_horizon.get('1-Month', 0)
         d3 = demand_by_horizon.get('3-Month', 0)
         d6 = demand_by_horizon.get('6-Month', 0)
 
-        # Calculate implied monthly demand
+        
         monthly_demands = []
-        # Month 1
+        
         monthly_demands.append(d1)
-        # Months 2-3
+        
         demand_month_2_3 = (d3 - d1) / 2 if d3 > d1 else 0
         monthly_demands.extend([demand_month_2_3] * 2)
-        # Months 4-6
+        
         demand_month_4_6 = (d6 - d3) / 3 if d6 > d3 else 0
         monthly_demands.extend([demand_month_4_6] * 3)
 
-        # Create future dates for x-axis labels
+        
         future_dates = [(datetime.today() + relativedelta(months=i)).strftime('%Y-%m') for i in range(6)]
 
-        # Create a DataFrame for the forecasted demand
+        
         forecast_df = pd.DataFrame({
             'Month': future_dates,
             'Implied Monthly Demand': monthly_demands
         })
 
-        # Create the forecasted demand chart
+        
         forecast_chart = alt.Chart(forecast_df).mark_line(point=True).encode(
             x=alt.X('Month:N', title='Month', sort=None),
             y=alt.Y('Implied Monthly Demand:Q', title='Implied Monthly Demand (Units)'),
@@ -177,12 +177,12 @@ def display_chatbot(selected_sku: str, full_df: pd.DataFrame) -> None:
             st.session_state[f"messages_{selected_sku}"].append({"role": "user", "content": prompt})
             st.chat_message("user").write(prompt)
 
-            # Mock response based on the prompt
+            
             if "reorder point" in prompt.lower():
-                # Aggregate reorder point data across channels for the 1-Month horizon
+                
                 reorder_point_data = full_df[(full_df['item_id'] == selected_sku) & (full_df['horizon'] == '1-Month')]
                 if not reorder_point_data.empty:
-                    # Sum reorder points across all channels for the SKU
+                    
                     total_reorder_point = reorder_point_data['reorder_point'].sum()
                     response = f"For SKU `{selected_sku}`, the combined 1-Month forecast suggests a total reorder point of **{total_reorder_point} units** across all channels."
                 else:
@@ -195,7 +195,7 @@ def display_chatbot(selected_sku: str, full_df: pd.DataFrame) -> None:
 
 def save_feedback(selected_sku: str, sku_data: pd.DataFrame, feedback: str):
     """Saves the user feedback to MongoDB."""
-    # Prepare the data to be saved
+    
     feedback_records = []
     for _, row in sku_data.iterrows():
         feedback_records.append({
@@ -213,7 +213,7 @@ def save_feedback(selected_sku: str, sku_data: pd.DataFrame, feedback: str):
     new_feedback_df = pd.DataFrame(feedback_records)
 
     try:
-        # Save to MongoDB only
+        
         save_feedback_to_mongo(new_feedback_df)
         st.success("Thank you for your feedback! It has been recorded.")
     except Exception as e:
@@ -233,22 +233,22 @@ def capture_feedback(selected_sku: str, sku_data: pd.DataFrame):
         if st.button("👎 Bad Forecast", use_container_width=True):
             save_feedback(selected_sku, sku_data, "Bad")
 
-# --- Main Application ---
+
 st.title('📦 Inventory Recommendations Dashboard')
 
-# 1) Create a radio button in the sidebar to select a page
+
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to:", ["Recommendations", "Analyze Data", "New SKU Forecast"])
 
 if page == "Recommendations":
-    # --- Main Content: Recommendations ---
-    # Load data from MongoDB
+    
+    
     reco_df = load_recommendation_data_from_mongo()
 
     if reco_df is None or reco_df.empty:
         st.info("ℹ️ Awaiting data. Please ensure recommendations are available in MongoDB.", icon="⏳")
     else:
-        # --- Sidebar for SKU Selection ---
+        
         with st.sidebar:
             st.header("⚙️ SKU Selection")
             sku_list = sorted(reco_df['item_id'].unique())
@@ -264,7 +264,7 @@ if page == "Recommendations":
             else:
                 selected_sku = st.radio("Select Item:", filtered_sku_list, index=0)
 
-        # --- Main Content Area ---
+        
         if selected_sku:
             st.header(f"Analysis for Item: `{selected_sku}`", divider="rainbow")
             sku_data = reco_df[reco_df['item_id'] == selected_sku].sort_values('forecast_days')
@@ -287,7 +287,7 @@ if page == "Recommendations":
 
 elif page == "Analyze Data":
     st.header("Analyze Data with EDA")
-    # --- KEY FIX: Use the absolute path from the config file ---
+    
     eda_dir = os.path.join(config.PROJECT_SRC, "eda", "target")
     if not os.path.isdir(eda_dir):
         os.makedirs(eda_dir, exist_ok=True)
@@ -311,7 +311,7 @@ elif page == "New SKU Forecast":
     st.info("""
     **Required CSV format:**
     - `sku`: Product identifier (e.g., A0215)
-    - `timestamp`: Date (e.g., `2025-07-02`)
+    - `timestamp`: Date (e.g., `2025-07-04`)
     - `target`: Sales quantity (numeric)
     - `disc`: Discount percentage (numeric)
     """)
@@ -320,51 +320,90 @@ elif page == "New SKU Forecast":
 
     if uploaded_file:
         try:
-            user_data = pd.read_csv(uploaded_file)
+            user_data_raw = pd.read_csv(uploaded_file)
             st.write("Uploaded Data Preview:")
-            st.dataframe(user_data.head())
+            st.dataframe(user_data_raw.head())
 
             required_columns = ["sku", "timestamp", "target", "disc"]
-            if not all(col in user_data.columns for col in required_columns):
+            if not all(col in user_data_raw.columns for col in required_columns):
                 st.error(f"Missing required columns. Please ensure your CSV has: {required_columns}")
             else:
-                with st.spinner("🚀 Evaluating performance and generating forecast..."):
+                
+                with st.status("🚀 Initializing forecast process...", expanded=True) as status:
                     try:
-                        # 1. Load the latest forecasting model
+                        
+                        status.write("1. Loading trained model...")
                         predictor = load_latest_predictor()
                         if predictor is None:
-                            st.error("🚨 Could not load a trained model. Please run the main training pipeline first.")
+                            status.update(label="🚨 Error: Could not load model.", state="error")
+                            st.error("Could not load a trained model. Please run the main training pipeline first.")
                             st.stop()
 
-                        # 2. Call the function to get both predictions and metrics
-                        predictions, metrics = make_fast_predictions(
-                            predictor=predictor,
-                            user_uploaded_data=user_data
+                        
+                        status.write("2. Loading training artifacts (features & holidays)...")
+                        static_feature_columns, holidays_df = load_prediction_artifacts()
+
+                        
+                        status.write("3. Preparing and enriching uploaded data...")
+                        enriched_data = prepare_prediction_data(user_data_raw, holidays_df)
+                        
+                        
+                        status.write("4. Creating time series structure...")
+                        enriched_data['channel'] = 'Online'
+                        enriched_data['item_id'] = enriched_data['sku'].astype(str) + "_" + enriched_data['channel']
+                        static_features = generate_static_features(enriched_data, all_training_columns=static_feature_columns)
+                        static_features.reset_index(inplace=True)
+                        ts_upload = TimeSeriesDataFrame.from_data_frame(
+                            enriched_data,
+                            id_column='item_id',
+                            timestamp_column='timestamp',
+                            static_features_df=static_features
                         )
 
-                        st.success("✅ Forecasts and performance metrics generated successfully!")
+                        
+                        status.write("5. Evaluating model performance on historical data...")
+                        min_series_length = ts_upload.index.get_level_values('item_id').value_counts().min()
+                        if min_series_length > predictor.prediction_length:
+                            metrics, _ = predictor.evaluate(ts_upload, display=False)
+                            status.write("   -> ✅ Performance evaluation complete.")
+                        else:
+                            reason = f"Uploaded data history ({min_series_length} points) is not longer than the model's prediction length ({predictor.prediction_length} points)."
+                            metrics = pd.DataFrame([{"info": "Evaluation skipped", "reason": reason}])
+                            status.write("   -> ⚠️ Performance evaluation skipped (data too short).")
 
-                        # 3. Display the performance metrics first
-                        st.subheader("Performance on Uploaded Data (Backtest)")
-                        st.dataframe(metrics)
-                        st.caption("Lower values for MASE, RMSE, and MAPE are better. A MASE score below 1.0 generally indicates that the model is performing better than a naive seasonal forecast.")
-
-                        # 4. Display the future forecast
-                        st.subheader("Future Forecast")
-                        st.dataframe(predictions)
-
-                        # 5. Add a download button for the forecast results
-                        st.download_button(
-                           label="Download Forecast Data (CSV)",
-                           data=predictions.to_csv(index=True).encode('utf-8'), # Save with index
-                           file_name='forecast_results.csv',
-                           mime='text/csv',
+                        
+                        status.write("6. Generating future forecast...")
+                        future_known_covariates = generate_future_covariates(predictor, ts_upload, holidays_df)
+                        predictions = predictor.predict(
+                            ts_upload,
+                            known_covariates=future_known_covariates
                         )
+                        
+                        status.update(label="✅ Process Complete!", state="complete", expanded=False)
 
                     except Exception as e:
-                        st.error(f"Error during forecast generation: {str(e)}")
-                        st.info("Please check that artifacts from the last training run exist and the data format is correct.")
+                        status.update(label=f"🚨 Error: {e}", state="error")
+                        st.error(f"An error occurred during forecast generation: {e}")
+                        st.stop()
+                
+                
+                st.subheader("Performance on Uploaded Data (Backtest)")
+                st.dataframe(metrics)
+
+                if "info" in metrics.columns and metrics.loc[0, "info"] == "Evaluation skipped":
+                    st.info(metrics.loc[0, "reason"])
+                elif isinstance(metrics, pd.DataFrame) and "MASE" in metrics.columns:
+                    st.caption("Lower values for MASE, RMSE, and MAPE are better. A MASE score below 1.0 generally indicates the model is better than a naive seasonal forecast.")
+
+                st.subheader("Future Forecast")
+                st.dataframe(predictions)
+
+                st.download_button(
+                label="Download Forecast Data (CSV)",
+                data=predictions.to_csv(index=True).encode('utf-8'),
+                file_name='forecast_results.csv',
+                mime='text/csv',
+                )
 
         except Exception as e:
             st.error(f"Error reading the uploaded file: {str(e)}")
-            st.info("Please ensure your CSV file is properly formatted and not corrupt.")
