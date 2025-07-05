@@ -328,10 +328,9 @@ elif page == "New SKU Forecast":
             if not all(col in user_data_raw.columns for col in required_columns):
                 st.error(f"Missing required columns. Please ensure your CSV has: {required_columns}")
             else:
-                
                 with st.status("🚀 Initializing forecast process...", expanded=True) as status:
                     try:
-                        
+                        # Step 1: Load Model
                         status.write("1. Loading trained model...")
                         predictor = load_latest_predictor()
                         if predictor is None:
@@ -339,15 +338,15 @@ elif page == "New SKU Forecast":
                             st.error("Could not load a trained model. Please run the main training pipeline first.")
                             st.stop()
 
-                        
+                        # Step 2: Load Artifacts
                         status.write("2. Loading training artifacts (features & holidays)...")
                         static_feature_columns, holidays_df = load_prediction_artifacts()
 
-                        
+                        # Step 3: Prepare Data
                         status.write("3. Preparing and enriching uploaded data...")
                         enriched_data = prepare_prediction_data(user_data_raw, holidays_df)
                         
-                        
+                        # Step 4: Create TimeSeries Structure
                         status.write("4. Creating time series structure...")
                         enriched_data['channel'] = 'Online'
                         enriched_data['item_id'] = enriched_data['sku'].astype(str) + "_" + enriched_data['channel']
@@ -360,18 +359,20 @@ elif page == "New SKU Forecast":
                             static_features_df=static_features
                         )
 
-                        
+                        # Step 5: Evaluate Performance (with safety check)
                         status.write("5. Evaluating model performance on historical data...")
                         min_series_length = ts_upload.index.get_level_values('item_id').value_counts().min()
                         if min_series_length > predictor.prediction_length:
-                            metrics, _ = predictor.evaluate(ts_upload, display=False)
+                            # --- KEY FIX IS HERE ---
+                            # Assign the single output of predictor.evaluate() to the metrics variable.
+                            metrics = predictor.evaluate(ts_upload, display=False)
                             status.write("   -> ✅ Performance evaluation complete.")
                         else:
                             reason = f"Uploaded data history ({min_series_length} points) is not longer than the model's prediction length ({predictor.prediction_length} points)."
                             metrics = pd.DataFrame([{"info": "Evaluation skipped", "reason": reason}])
                             status.write("   -> ⚠️ Performance evaluation skipped (data too short).")
 
-                        
+                        # Step 6: Generate Future Forecast
                         status.write("6. Generating future forecast...")
                         future_known_covariates = generate_future_covariates(predictor, ts_upload, holidays_df)
                         predictions = predictor.predict(
@@ -386,23 +387,18 @@ elif page == "New SKU Forecast":
                         st.error(f"An error occurred during forecast generation: {e}")
                         st.stop()
                 
-                
+                # --- Display Results ---
                 st.subheader("Performance on Uploaded Data (Backtest)")
                 st.dataframe(metrics)
-
-                if "info" in metrics.columns and metrics.loc[0, "info"] == "Evaluation skipped":
-                    st.info(metrics.loc[0, "reason"])
-                elif isinstance(metrics, pd.DataFrame) and "MASE" in metrics.columns:
-                    st.caption("Lower values for MASE, RMSE, and MAPE are better. A MASE score below 1.0 generally indicates the model is better than a naive seasonal forecast.")
-
+                
                 st.subheader("Future Forecast")
                 st.dataframe(predictions)
 
                 st.download_button(
-                label="Download Forecast Data (CSV)",
-                data=predictions.to_csv(index=True).encode('utf-8'),
-                file_name='forecast_results.csv',
-                mime='text/csv',
+                   label="Download Forecast Data (CSV)",
+                   data=predictions.to_csv(index=True).encode('utf-8'),
+                   file_name='forecast_results.csv',
+                   mime='text/csv',
                 )
 
         except Exception as e:
