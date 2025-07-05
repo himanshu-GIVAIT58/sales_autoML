@@ -14,16 +14,17 @@ from autogluon.timeseries import TimeSeriesPredictor, TimeSeriesDataFrame
 from src import config
 from src.feature_engineering import create_seasonal_features, prepare_data, generate_static_features, create_inventory_features, create_price_elasticity_features, create_trend_features
 
-
-
 def train_predictor(ts_data, config):
     """
-    Trains the TimeSeriesPredictor with the given data and configuration.
+    Trains a TimeSeriesPredictor. AutoGluon will automatically fine-tune
+    an existing model if one is found at config.MODEL_SAVE_PATH.
     """
     try:
-        print("\nTraining forecasting models with enhanced configuration...")
+        print("\nTraining or fine-tuning forecasting models...")
         os.makedirs(config.MODEL_SAVE_PATH, exist_ok=True)
 
+        
+        
         predictor = TimeSeriesPredictor(
             prediction_length=config.PREDICTION_LENGTH,
             path=config.MODEL_SAVE_PATH,
@@ -32,12 +33,15 @@ def train_predictor(ts_data, config):
             freq=config.FREQ,
             eval_metric=config.EVAL_METRIC,
             quantile_levels=config.QUANTILE_LEVELS
-        ).fit(
+        )
+        predictor.fit(
             ts_data,
             presets=config.AUTOGLUON_PRESETS,
             time_limit=config.TIME_LIMIT,
             num_val_windows=config.NUM_VAL_WINDOWS,
+            excluded_model_types=['DirectTabular']
         )
+
         print("Model training completed.")
         return predictor
     except Exception as e:
@@ -46,22 +50,29 @@ def train_predictor(ts_data, config):
 
 def evaluate_predictor(predictor, ts_data):
     """
-    Prints the model leaderboard and detailed evaluation metrics.
+    Prints the model leaderboard and returns a dictionary of all
+    calculated performance metrics.
     """
     try:
         print("\n--- Model Leaderboard ---")
-        leaderboard = predictor.leaderboard()
+        leaderboard = predictor.leaderboard(ts_data)
         print(leaderboard)
 
         print("\n--- Detailed Error Metrics ---")
-        evaluation_summary = predictor.evaluate(ts_data)
+        
+        
+        evaluation_summary = predictor.evaluate(ts_data, display=False)
         print(evaluation_summary)
+
+        
         return evaluation_summary
     except Exception as e:
         print(f"❌ Error during model evaluation: {e}")
         raise
 
-def load_latest_predictor(model_path: str = None):
+from typing import Optional
+
+def load_latest_predictor(model_path: Optional[str] = None):
     """
     Loads the latest saved AutoGluon TimeSeriesPredictor from the artifacts path.
     """
@@ -141,27 +152,21 @@ def make_predictions(predictor, ts_data=None, holidays_df=None, user_uploaded_da
         print(f"❌ Error during prediction generation: {e}")
         raise
 
-def make_fast_predictions(predictor, user_uploaded_data):
-    """
-    (Fast Method) Generates forecasts from a user-uploaded CSV and evaluates
-    the model's performance on that historical data.
-    """
-    if predictor is None:
-        raise ValueError("A trained predictor object must be provided.")
-
-    print("\n🚀 Starting FAST prediction process using artifacts...")
-
+def load_prediction_artifacts():
+    """Loads the artifacts needed for making predictions."""
     try:
         static_columns_path = os.path.join(config.ARTIFACTS_PATH, 'static_feature_columns.joblib')
         holidays_path = os.path.join(config.ARTIFACTS_PATH, 'holidays.csv')
         static_feature_columns = joblib.load(static_columns_path)
         holidays_df = pd.read_csv(holidays_path, parse_dates=['timestamp'])
+        return static_feature_columns, holidays_df
     except FileNotFoundError as e:
         print(f"❌ Error: Artifact not found at '{config.ARTIFACTS_PATH}'.")
         raise e
 
-    # --- 1. Prepare and Enrich User's Historical Data ---
-    user_data = user_uploaded_data.copy()
+def prepare_prediction_data(user_data_raw, holidays_df):
+    """Enriches the raw user-uploaded data with all necessary features."""
+    user_data = user_data_raw.copy()
     user_data['timestamp'] = pd.to_datetime(user_data['timestamp'])
     user_data = create_seasonal_features(user_data)
     user_data = pd.merge(user_data, holidays_df[['timestamp', 'is_holiday']], on='timestamp', how='left').fillna({'is_holiday': 0})
@@ -173,38 +178,61 @@ def make_fast_predictions(predictor, user_uploaded_data):
     for col in config.KNOWN_COVARIATES_NAMES:
         if col not in user_data.columns:
             user_data[col] = 0
+    return user_data
 
-    # --- 2. Create Static Features and TimeSeriesDataFrame ---
-    user_data['channel'] = 'Online'
-    user_data['item_id'] = user_data['sku'].astype(str) + "_" + user_data['channel']
-    static_features = generate_static_features(user_data, all_training_columns=static_feature_columns)
+def generate_future_covariates(predictor, ts_data, holidays_df):
+    """Generates the known covariates for the future prediction window."""
+    future_covariates = predictor.make_future_data_frame(ts_data)
+    future_covariates = create_seasonal_features(future_covariates)
+    future_covariates = pd.merge(future_covariates, holidays_df[['timestamp', 'is_holiday']], on='timestamp', how='left').fillna(0)
+    for col in config.KNOWN_COVARIATES_NAMES:
+        if col not in future_covariates.columns:
+            future_covariates[col] = 0
+    return future_covariates
+
+
+def make_fast_predictions(predictor, user_uploaded_data):
+    """
+    Orchestrates the fast prediction process, from loading artifacts
+    to safely evaluating and forecasting. This function always returns
+    a tuple of (predictions, metrics).
+    """
+    if predictor is None:
+        raise ValueError("A trained predictor object must be provided.")
+
+    
+    static_feature_columns, holidays_df = load_prediction_artifacts()
+    enriched_data = prepare_prediction_data(user_uploaded_data, holidays_df)
+
+    
+    enriched_data['channel'] = 'Online'
+    enriched_data['item_id'] = enriched_data['sku'].astype(str) + "_" + enriched_data['channel']
+    static_features = generate_static_features(enriched_data, all_training_columns=static_feature_columns)
     static_features.reset_index(inplace=True)
     ts_upload = TimeSeriesDataFrame.from_data_frame(
-        user_data,
+        enriched_data,
         id_column='item_id',
         timestamp_column='timestamp',
         static_features_df=static_features
     )
 
-    # --- 3. Evaluate Model Performance on Uploaded Data ---
-    print("  -> Evaluating model performance on the provided data (backtesting)...")
-    # The `evaluate` method returns a tuple: (metrics_df, backtest_predictions_df)
-    metrics, backtest_predictions = predictor.evaluate(ts_upload, display=False)
-
-    # --- 4. Generate Future Forecasts ---
-    print("  -> Generating future forecasts...")
-    future_known_covariates = predictor.make_future_data_frame(ts_upload)
-    future_known_covariates = create_seasonal_features(future_known_covariates)
-    future_known_covariates = pd.merge(future_known_covariates, holidays_df[['timestamp', 'is_holiday']], on='timestamp', how='left').fillna(0)
-    for col in config.KNOWN_COVARIATES_NAMES:
-        if col not in future_known_covariates.columns:
-            future_known_covariates[col] = 0
     
+    metrics = None
+    min_series_length = ts_upload.index.get_level_values('item_id').value_counts().min()
+    if min_series_length > predictor.prediction_length:
+        print("  -> Data is long enough. Evaluating model performance...")
+        metrics, _ = predictor.evaluate(ts_upload, display=False)
+    else:
+        print(f"  -> Data is too short to evaluate. Skipping evaluation.")
+        reason = f"Uploaded data history ({min_series_length} points) is not longer than the model's prediction length ({predictor.prediction_length} points)."
+        metrics = pd.DataFrame([{"info": "Evaluation skipped", "reason": reason}])
+
+    
+    future_known_covariates = generate_future_covariates(predictor, ts_upload, holidays_df)
     predictions = predictor.predict(
         ts_upload,
         known_covariates=future_known_covariates
     )
     
     print("✅ Forecasts and metrics generated successfully!")
-    # --- 5. Return both the future predictions and the performance metrics ---
     return predictions, metrics

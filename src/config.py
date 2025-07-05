@@ -5,13 +5,12 @@ ORDERING_COST = 20.0
 ANNUAL_HOLDING_COST_PER_UNIT = 3.0
 LEAD_TIME_DAYS = 40
 MINIMUM_ORDER_QUANTITY = 10
-# MODEL_SAVE_PATH = "src/autogluon_models/"
 
 PROJECT_ROOT = "/app"
 PROJECT_SRC = os.path.join(PROJECT_ROOT, "src")
 
 # Define absolute paths for models and artifacts
-MODEL_SAVE_PATH = os.path.join(PROJECT_SRC, "autogluon_models")
+MODEL_SAVE_PATH = os.path.join(PROJECT_ROOT, "autogluon_models")
 ARTIFACTS_PATH = os.path.join(PROJECT_ROOT, "artifacts")
 
 # --- ABC Analysis Config ---
@@ -24,8 +23,8 @@ ABC_CONFIG = {
 }
 
 # --- Model & Data Parameters ---
-MAX_SKUS = 1000
-PREDICTION_LENGTH = 30
+MAX_SKUS = 100
+PREDICTION_LENGTH = 183
 
 KNOWN_COVARIATES_NAMES = [
     'was_stocked_out', 'is_holiday', 'is_on_promotion', 'month', 'day_of_week',
@@ -40,8 +39,8 @@ TARGET_COL = 'target'
 ITEM_ID_COL = 'sku'
 
 # --- AutoGluon Model Training Parameters ---
-AUTOGLUON_PRESETS = "best_quality"
-TIME_LIMIT = 9000
+AUTOGLUON_PRESETS = "fast_training"
+TIME_LIMIT = 600
 NUM_VAL_WINDOWS = 5
 EVAL_METRIC = "MASE"
 FREQ = "D"

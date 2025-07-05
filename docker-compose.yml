@@ -6,7 +6,7 @@ services:
     develop:
       watch:
         # Watch Python files for changes and sync + restart
-        - path: ./src/*.py
+        - path: ./src
           target: /app/src
           action: sync+restart
         # Watch requirements and rebuild container
@@ -24,10 +24,8 @@ services:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
     volumes:
-      - ./src:/app/src # Mount the source code for development
       - ./artifacts:/app/artifacts
       - ./autogluon_models:/app/autogluon_models
-    command: python -m streamlit run src/inventory_dashboard_streamlit.py --server.address=0.0.0.0
     depends_on:
       - mongodb
 
