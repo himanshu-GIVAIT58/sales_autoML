@@ -49,10 +49,6 @@ def train_predictor(ts_data, config):
         raise
 
 def evaluate_predictor(predictor, ts_data):
-    """
-    Prints the model leaderboard and returns a dictionary of all
-    calculated performance metrics.
-    """
     try:
         print("\n--- Model Leaderboard ---")
         leaderboard = predictor.leaderboard(ts_data)
@@ -73,9 +69,6 @@ def evaluate_predictor(predictor, ts_data):
 from typing import Optional
 
 def load_latest_predictor(model_path: Optional[str] = None):
-    """
-    Loads the latest saved AutoGluon TimeSeriesPredictor from the artifacts path.
-    """
     try:
         model_dir = model_path if model_path else config.MODEL_SAVE_PATH
         if not os.path.exists(model_dir):
@@ -88,10 +81,6 @@ def load_latest_predictor(model_path: Optional[str] = None):
         return None
 
 def make_predictions(predictor, ts_data=None, holidays_df=None, user_uploaded_data=None):
-    """
-    (Slow Method) Generates predictions by running the full feature engineering pipeline.
-    Suitable for the main batch training run where data consistency is paramount.
-    """
     if predictor is None:
         raise ValueError("A trained predictor object must be provided.")
 

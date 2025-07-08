@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 import os
 import numpy as np
 from autogluon.timeseries.predictor import TimeSeriesPredictor
+from pymongo.database import Database
+
 
 def log_model_run(
     predictor: TimeSeriesPredictor,
@@ -76,8 +78,6 @@ def check_for_drift(
     avg_diff = np.mean(diffs)
     drift_detected = avg_diff > threshold
     return bool(drift_detected)
-
-from pymongo.database import Database
 
 def rollback_to_previous_version(
     db: Database,

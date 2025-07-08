@@ -1,12 +1,10 @@
-# feature_engineering.py
+
 """
 Contains all functions for data preparation and feature engineering,
 refactored for robustness, readability, and industry-standard practices.
 """
 import pandas as pd
 from typing import Tuple, List
-
-# --- Feature Creation Functions (Unchanged) ---
 
 def create_seasonal_features(df: pd.DataFrame) -> pd.DataFrame:
     """Adds time-based seasonal features relevant to jewelry sales."""
@@ -29,7 +27,7 @@ def create_price_elasticity_features(df: pd.DataFrame) -> pd.DataFrame:
 
 def create_inventory_features(df: pd.DataFrame) -> pd.DataFrame:
     """Adds features related to inventory levels and stockouts."""
-    # This function now expects 'warehouse_qty' to be a clean, numeric column
+    
     df['was_stocked_out'] = (df['warehouse_qty'] <= 0).astype(int)
     stockout_rolling_sum = df.groupby('sku')['was_stocked_out'].transform(lambda x: x.shift(1).rolling(7, min_periods=1).sum())
     df['stockout_days_last_7'] = stockout_rolling_sum.fillna(0)
@@ -64,7 +62,7 @@ def prepare_data(source_data: pd.DataFrame, inventory_data: pd.DataFrame, holida
     """Executes the full data preparation and feature engineering pipeline."""
     print("\nPreparing and regularizing data...")
 
-    # 1. Filter to top SKUs
+    
     if max_skus is not None:
         print(f"Identifying top {max_skus} SKUs to reduce memory usage...")
         sku_sales_totals = source_data.groupby('sku')['qty'].sum().sort_values(ascending=False)
@@ -73,7 +71,7 @@ def prepare_data(source_data: pd.DataFrame, inventory_data: pd.DataFrame, holida
         inventory_data = inventory_data[inventory_data["sku"].isin(top_n_skus)].copy()
         print(f"Data now contains only the top {len(top_n_skus)} SKUs.")
 
-    # 2. Clean and prepare base dataframes
+    
     sales_df = source_data[['created_at', 'sku', 'qty', 'category', 'gender', 'disc', 'Channel']].copy()
     sales_df['channel'] = sales_df['Channel'].str.strip().fillna('Unknown')
     sales_df.rename(columns={"created_at": "timestamp", "qty": "target"}, inplace=True)
@@ -93,42 +91,42 @@ def prepare_data(source_data: pd.DataFrame, inventory_data: pd.DataFrame, holida
     holidays_df['is_holiday'] = 1
     holidays_df = holidays_df.drop_duplicates(subset=['timestamp'])
 
-    # 3. Merge data and engineer features
+    
     df = pd.merge(sales_df, inventory_daily_df, on=["sku", "timestamp"], how="left")
 
-    # --- KEY FIX: Enforce numeric type for warehouse_qty after merging ---
-    # This ensures the column is purely numeric before being passed to feature functions.
+    
+    
     df['warehouse_qty'] = pd.to_numeric(df['warehouse_qty'], errors='coerce').fillna(1)
     
-    # Now, call the feature engineering functions on the clean DataFrame
+    
     df = create_seasonal_features(df)
     df = create_price_elasticity_features(df)
-    df = create_inventory_features(df) # This will now work without a TypeError
+    df = create_inventory_features(df) 
     df = create_trend_features(df)
     
     df['gold_price_change'] = 0.0
     df['gold_price_ma_7'] = 0.0
     df['item_id'] = df['sku'].astype(str) + "_" + df['channel'].astype(str)
 
-    # 4. Create static features
+    
     print("Generating static features...")
     static_features_df = generate_static_features(df)
     print(f"✅ Generated static features. Column names: {list(static_features_df.columns)}")
 
-    # 5. Aggregate to daily level
+    
     agg_cols = [c for c in df.columns if c not in ['sku', 'channel', 'target', 'timestamp', 'item_id', 'disc', 'Channel', 'category', 'gender', 'brand_category', 'category_channel']]
     agg_dict = {col: "first" for col in agg_cols}
     agg_dict['target'] = "sum"
     df_daily = df.groupby(["item_id", "sku", "channel", "timestamp"]).agg(agg_dict).reset_index()
 
-    # 6. Regularize time series
+    
     all_items = df_daily["item_id"].unique().tolist()
     date_range = pd.date_range(start=df_daily["timestamp"].min(), end=df_daily["timestamp"].max(), freq='D')
     multi_index = pd.MultiIndex.from_product([all_items, list(date_range)], names=["item_id", "timestamp"])
     regularized_data = pd.DataFrame(index=multi_index).reset_index()
     regularized_data = pd.merge(regularized_data, df_daily, on=["item_id", "timestamp"], how="left")
 
-    # 7. Robust data filling
+    
     print("   -> Propagating static attributes and filling data gaps...")
     id_to_static_map = df[['item_id', 'sku', 'channel']].drop_duplicates()
     regularized_data = regularized_data.drop(columns=['sku', 'channel'], errors='ignore')
@@ -145,47 +143,37 @@ def prepare_data(source_data: pd.DataFrame, inventory_data: pd.DataFrame, holida
     return regularized_data, static_features_df
 
 def prepare_data_for_analysis(source_data: pd.DataFrame, holidays_data: pd.DataFrame, max_skus: int = None) -> pd.DataFrame:
-    """
-    Prepares a clean, regularized dataset specifically for analysis,
-    ensuring all necessary columns like 'disc' are preserved.
-    """
     print("\nPreparing data for analysis...")
-
-    # 1. Filter to top SKUs if specified
     if max_skus is not None:
         sku_sales_totals = source_data.groupby('sku')['qty'].sum().sort_values(ascending=False)
         top_n_skus = sku_sales_totals.nlargest(max_skus).index
         source_data = source_data[source_data["sku"].isin(top_n_skus)].copy()
-
-    # 2. Clean and prepare base dataframes
     sales_df = source_data[['created_at', 'sku', 'qty', 'category', 'gender', 'disc', 'Channel']].copy()
     sales_df.rename(columns={"created_at": "timestamp", "qty": "target"}, inplace=True)
     sales_df["timestamp"] = pd.to_datetime(sales_df["timestamp"], dayfirst=True, errors='coerce').dropna()
     sales_df["target"] = pd.to_numeric(sales_df["target"], errors='coerce').fillna(0)
     sales_df["disc"] = pd.to_numeric(sales_df["disc"], errors='coerce').fillna(0)
-
-    # 3. Engineer Core Features
     df = create_seasonal_features(sales_df)
     df = create_price_elasticity_features(df)
     df['item_id'] = df['sku'].astype(str) + "_" + df.get('channel', 'Unknown').astype(str)
 
-    # 4. Aggregate to daily level, ensuring 'disc' is kept
+    
     agg_dict = {
         'target': 'sum',
-        'disc': 'mean', # Use the average daily discount
-        'is_on_promotion': 'max', # If it was on promo at all during the day, flag it
+        'disc': 'mean', 
+        'is_on_promotion': 'max', 
         'is_high_discount': 'max'
     }
     df_daily = df.groupby(["item_id", "sku", "timestamp"]).agg(agg_dict).reset_index()
 
-    # 5. Regularize time series
+    
     all_items = df_daily["item_id"].unique()
     date_range = pd.date_range(start=df_daily["timestamp"].min(), end=df_daily["timestamp"].max(), freq='D')
     multi_index = pd.MultiIndex.from_product([all_items, date_range], names=["item_id", "timestamp"])
     regularized_data = pd.DataFrame(index=multi_index).reset_index()
     regularized_data = pd.merge(regularized_data, df_daily, on=["item_id", "timestamp"], how="left")
     
-    # 6. Final Data Filling
+    
     id_to_sku_map = df[['item_id', 'sku']].drop_duplicates()
     regularized_data = pd.merge(regularized_data, id_to_sku_map, on='item_id', how='left')
     
@@ -196,7 +184,7 @@ def prepare_data_for_analysis(source_data: pd.DataFrame, holidays_data: pd.DataF
     
     regularized_data = pd.merge(regularized_data, holidays_df, on="timestamp", how="left")
     
-    # Forward-fill all columns except the target and discount
+    
     ffill_cols = [col for col in regularized_data.columns if col not in ['target', 'disc']]
     regularized_data[ffill_cols] = regularized_data.groupby('item_id')[ffill_cols].transform(lambda x: x.ffill().bfill())
     regularized_data.fillna(0, inplace=True)

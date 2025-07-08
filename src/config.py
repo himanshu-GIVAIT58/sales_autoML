@@ -1,4 +1,4 @@
-# --- Cost & Inventory Parameters ---
+
 import os 
 
 ORDERING_COST = 20.0
@@ -9,11 +9,11 @@ MINIMUM_ORDER_QUANTITY = 10
 PROJECT_ROOT = "/app"
 PROJECT_SRC = os.path.join(PROJECT_ROOT, "src")
 
-# Define absolute paths for models and artifacts
+
 MODEL_SAVE_PATH = os.path.join(PROJECT_ROOT, "autogluon_models")
 ARTIFACTS_PATH = os.path.join(PROJECT_ROOT, "artifacts")
 
-# --- ABC Analysis Config ---
+
 ABC_CONFIG = {
     'A_class_percentage': 0.2,
     'B_class_percentage': 0.3,
@@ -22,8 +22,8 @@ ABC_CONFIG = {
     'service_level_C': 0.90,
 }
 
-# --- Model & Data Parameters ---
-MAX_SKUS = 100
+
+MAX_SKUS = 1000
 PREDICTION_LENGTH = 183
 
 KNOWN_COVARIATES_NAMES = [
@@ -38,21 +38,18 @@ KNOWN_COVARIATES_NAMES = [
     'sales_std_30'
 ]
 
-# Column names for TimeSeriesDataFrame
 TIMESTAMP_COL = 'timestamp'
 TARGET_COL = 'target'
 ITEM_ID_COL = 'sku'
 
-# --- AutoGluon Model Training Parameters ---
 AUTOGLUON_PRESETS = "best_quality"
-TIME_LIMIT = 3600  # 10 hours in seconds
+TIME_LIMIT = 180 
 NUM_VAL_WINDOWS = 5
-EVAL_METRIC = "MASE"
+EVAL_METRIC = "MAE"
 FREQ = "D"
 QUANTILE_LEVELS = [0.1, 0.25, 0.5, 0.75, 0.9]
 TARGET_COLUMN = "target"
 
-# --- Forecast Horizons & Channel Mapping ---
 HORIZONS = {"1-Month": 30, "3-Month": 90, "6-Month": 183}
 CHANNEL_TO_WH_RECOMMENDATION = {
     'Web': 'central_online_wh',
