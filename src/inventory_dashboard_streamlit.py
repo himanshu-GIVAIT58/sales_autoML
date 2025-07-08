@@ -78,17 +78,11 @@ def display_sku_overview(sku_data: pd.DataFrame) -> None:
             st.markdown(f"**Order Quantity (EOQ):** `{row['economic_order_quantity (EOQ)']}`")
 
 def display_demand_chart(sku_data: pd.DataFrame) -> None:
-    """Visualizes the total forecasted demand across different horizons."""
     st.subheader("Demand Forecast Comparison", divider="gray")
 
-    
     col1, col2 = st.columns(2)
 
-    
     with col1:
-        st.markdown("**Total Demand by Forecast Horizon**")
-        
-        
         agg_sku_data = sku_data.groupby('horizon')['total_forecasted_demand'].sum().reset_index()
 
         current_chart = alt.Chart(agg_sku_data).mark_bar(
@@ -115,9 +109,6 @@ def display_demand_chart(sku_data: pd.DataFrame) -> None:
 
     
     with col2:
-        st.markdown("**Implied Monthly Demand for Next 6 Months**")
-        
-        
         demand_by_horizon = sku_data.groupby('horizon')['total_forecasted_demand'].sum()
 
         d1 = demand_by_horizon.get('1-Month', 0)

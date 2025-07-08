@@ -8,3 +8,12 @@ python-dotenv
 ipython
 autoviz
 joblib
+tensorflow
+keras-tuner
+prophet
+tslearn
+optuna
+shap
+scikit-learn
+statsmodels
+xgboost
