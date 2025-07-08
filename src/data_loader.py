@@ -62,11 +62,6 @@ def load_dataframe_from_mongo(collection_name: str, mongo_uri: str = MONGO_URI, 
             client.close()
 
 def get_latest_recommendation_collection(db) -> Optional[str]:
-    """
-    Finds the latest inventory recommendation collection name.
-    
-    Collection names are expected in the format: "inventory_recommendations_<YYYYMMDD_HHMMSS>"
-    """
     try:
         collection_names = db.list_collection_names()
         

@@ -44,8 +44,8 @@ TARGET_COL = 'target'
 ITEM_ID_COL = 'sku'
 
 # --- AutoGluon Model Training Parameters ---
-AUTOGLUON_PRESETS = "fast_training"
-TIME_LIMIT = 600
+AUTOGLUON_PRESETS = "best_quality"
+TIME_LIMIT = 3600  # 10 hours in seconds
 NUM_VAL_WINDOWS = 5
 EVAL_METRIC = "MASE"
 FREQ = "D"
