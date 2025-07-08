@@ -78,7 +78,7 @@ def main():
     print("   -> Model training/retraining complete. Evaluating...")
     metrics = model_handler.evaluate_predictor(predictor, ts_data)
     if metrics is None:
-        metrics = {'MASE': 999}
+        metrics = {'MAE': 999}
     print(f"   -> Model evaluation metrics: {metrics}")
 
     print("\nStep 6: Saving training artifacts for fast prediction...")
