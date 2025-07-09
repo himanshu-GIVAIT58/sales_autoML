@@ -1,19 +1,20 @@
 name: AutoML Retrain on Data Update
 
 on:
+  # Re-train when relevant files are pushed
   push:
     paths:
-      - "data/**"
       - "requirements.txt"
-      - "src/main.py"
-      - "src/model_handler.py"
-      - "src/feature_engineering.py"
-      - "src/data_loader.py"
+      - "src/**"
       - ".env"
       - ".github/workflows/**"
 
+  # Monthly scheduled retrain
   schedule:
-    - cron: "0 0 1 * *"
+    - cron: "0 0 1 * *"  # At 00:00 on the 1st of each month
+
+  # Manual trigger
+  workflow_dispatch:
 
 jobs:
   retrain:
@@ -26,44 +27,31 @@ jobs:
           - 27017:27017
         options: >-
           --health-cmd "mongosh --eval 'db.adminCommand({ ping: 1 })'"
-          --health-interval 30s
-          --health-timeout 10s
+          --health-interval 10s
+          --health-timeout 5s
           --health-retries 10
 
     steps:
-      # Step 1: Checkout the code
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      # Step 2: Debug - List files
-      - name: List files
-        run: ls -R
-
-      # Step 3: Set up Python environment
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # Step 4: Install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r src/requirements.txt
 
-      # Step 5: List running containers
-      - name: List running containers
-        run: docker ps -a
+      - name: Verify MongoDB connection
+        run: |
+          sleep 10
+          mongosh "mongodb://localhost:27017" --eval "db.adminCommand({ ping: 1 })"
 
-      # Step 6: Debug MongoDB Logs (Optional)
-      - name: Debug MongoDB Logs
-        run: docker logs $(docker ps -q --filter "ancestor=mongo:6.0")
-
-      # Step 7: Run the training script
       - name: Run training script
         env:
-          MONGO_URI: mongodb://root:example@mongodb:27017/
+          MONGO_URI: mongodb://root:example@localhost:27017/
           MONGO_DB: sales_automl
         run: python -m src.main
