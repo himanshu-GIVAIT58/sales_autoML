@@ -1,7 +1,6 @@
 import datetime
 import os
 import pandas as pd
-from pymongo import MongoClient
 from dotenv import load_dotenv
 from autogluon.timeseries import TimeSeriesDataFrame
 import joblib
@@ -21,16 +20,16 @@ def main():
     try:
         sales_df = data_loader.load_dataframe_from_mongo("sales_data")
         print(f"   -> Loaded {len(sales_df)} historical sales records.")
-        new_sales_df = data_loader.load_dataframe_from_mongo("new_sales_data_uploads")
-        if not new_sales_df.empty:
-            print(f"   -> Found {len(new_sales_df)} new records to integrate.")
-            new_sales_df.rename(columns={'sku': 'item_id', 'timestamp': 'order_date', 'disc': 'discount_percentage'}, inplace=True)
-            new_sales_df['order_date'] = pd.to_datetime(new_sales_df['order_date'])
-            sales_df = pd.concat([sales_df, new_sales_df], ignore_index=True)
-            sales_df.drop_duplicates(subset=['item_id', 'order_date'], keep='last', inplace=True)
-            print(f"   -> Combined dataset now has {len(sales_df)} unique records.")
-        else:
-            print("   -> No new sales data found.")
+        # new_sales_df = data_loader.load_dataframe_from_mongo("new_sales_data_uploads")
+        # if not new_sales_df.empty:
+        #     print(f"   -> Found {len(new_sales_df)} new records to integrate.")
+        #     new_sales_df.rename(columns={'sku': 'item_id', 'timestamp': 'order_date', 'disc': 'discount_percentage'}, inplace=True)
+        #     new_sales_df['order_date'] = pd.to_datetime(new_sales_df['order_date'])
+        #     sales_df = pd.concat([sales_df, new_sales_df], ignore_index=True)
+        #     sales_df.drop_duplicates(subset=['item_id', 'order_date'], keep='last', inplace=True)
+        #     print(f"   -> Combined dataset now has {len(sales_df)} unique records.")
+        # else:
+        #     print("   -> No new sales data found.")
         inventory_df = data_loader.load_dataframe_from_mongo("query_result")
         holidays_df = data_loader.load_dataframe_from_mongo("holidays_data")
         print("   -> Successfully loaded inventory and holidays data.")

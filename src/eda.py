@@ -1,4 +1,4 @@
-# eda.py
+
 """
 This script loads data from MongoDB, processes it, and then runs AutoViz 
 to generate and save exploratory data analysis (EDA) charts.
@@ -9,7 +9,7 @@ import pandas as pd
 from autoviz.AutoViz_Class import AutoViz_Class
 from dotenv import load_dotenv
 
-# Local project modules
+
 import config
 import data_loader
 import feature_engineering
@@ -24,18 +24,18 @@ def run_eda_from_mongo(
     
     print("🚀 Starting EDA process...")
 
-    # 1. Load raw data using the new data_loader function
+    
     print("Step 1/4: Loading data from MongoDB...")
     sales_df = data_loader.load_dataframe_from_mongo("sales_data")
     inventory_df = data_loader.load_dataframe_from_mongo("query_result")
     holidays_df = data_loader.load_dataframe_from_mongo("holidays_data")
 
-    # Verify that data was loaded
+    
     if sales_df.empty or inventory_df.empty:
         print("⚠️ Error: Sales or inventory data could not be loaded. Aborting EDA.")
         return
 
-    # 2. Prepare data using the feature_engineering pipeline
+    
     print("Step 2/4: Preparing data with feature engineering...")
     processed_data, _ = feature_engineering.prepare_data(
         source_data=sales_df,
@@ -44,13 +44,13 @@ def run_eda_from_mongo(
         max_skus=config.MAX_SKUS,
     )
 
-    # 3. Write processed data to a temporary CSV for AutoViz
+    
     print(f"Step 3/4: Saving processed data to '{csv_output}'...")
     os.makedirs(save_folder, exist_ok=True)
     processed_data.to_csv(csv_output, index=False)
     print(f"   -> Data saved successfully.")
 
-    # 4. Run AutoViz on the processed data
+    
     print(f"Step 4/4: Running AutoViz to generate charts...")
     av = AutoViz_Class()
     av.AutoViz(

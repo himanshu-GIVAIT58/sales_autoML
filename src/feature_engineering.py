@@ -1,10 +1,5 @@
-
-"""
-Contains all functions for data preparation and feature engineering,
-refactored for robustness, readability, and industry-standard practices.
-"""
 import pandas as pd
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 def create_seasonal_features(df: pd.DataFrame) -> pd.DataFrame:
     """Adds time-based seasonal features relevant to jewelry sales."""
@@ -43,7 +38,7 @@ def create_trend_features(df: pd.DataFrame) -> pd.DataFrame:
     df['potential_lost_sales'] = df['potential_lost_sales'].fillna(0)
     return df
 
-def generate_static_features(df: pd.DataFrame, all_training_columns: List[str] = None) -> pd.DataFrame:
+def generate_static_features(df: pd.DataFrame, all_training_columns: Optional[List[str]] = None) -> pd.DataFrame:
     """Generates a one-hot encoded static features DataFrame from a base DataFrame."""
     df_static = df.copy()
     if 'category' not in df_static.columns: df_static['category'] = 'unknown'
@@ -58,7 +53,7 @@ def generate_static_features(df: pd.DataFrame, all_training_columns: List[str] =
         static_features_df = static_features_df.reindex(columns=all_training_columns, fill_value=0)
     return static_features_df
 
-def prepare_data(source_data: pd.DataFrame, inventory_data: pd.DataFrame, holidays_data: pd.DataFrame, max_skus: int = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def prepare_data(source_data: pd.DataFrame, inventory_data: pd.DataFrame, holidays_data: pd.DataFrame, max_skus: Optional[int] = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Executes the full data preparation and feature engineering pipeline."""
     print("\nPreparing and regularizing data...")
 
@@ -142,7 +137,7 @@ def prepare_data(source_data: pd.DataFrame, inventory_data: pd.DataFrame, holida
     print("Data preparation and feature engineering complete.")
     return regularized_data, static_features_df
 
-def prepare_data_for_analysis(source_data: pd.DataFrame, holidays_data: pd.DataFrame, max_skus: int = None) -> pd.DataFrame:
+def prepare_data_for_analysis(source_data: pd.DataFrame, holidays_data: pd.DataFrame, max_skus: Optional[int] = None) -> pd.DataFrame:
     print("\nPreparing data for analysis...")
     if max_skus is not None:
         sku_sales_totals = source_data.groupby('sku')['qty'].sum().sort_values(ascending=False)
@@ -155,7 +150,9 @@ def prepare_data_for_analysis(source_data: pd.DataFrame, holidays_data: pd.DataF
     sales_df["disc"] = pd.to_numeric(sales_df["disc"], errors='coerce').fillna(0)
     df = create_seasonal_features(sales_df)
     df = create_price_elasticity_features(df)
-    df['item_id'] = df['sku'].astype(str) + "_" + df.get('channel', 'Unknown').astype(str)
+    if 'channel' not in df.columns:
+        df['channel'] = 'Unknown'
+    df['item_id'] = df['sku'].astype(str) + "_" + df['channel'].fillna('Unknown').astype(str)
 
     
     agg_dict = {
@@ -167,8 +164,8 @@ def prepare_data_for_analysis(source_data: pd.DataFrame, holidays_data: pd.DataF
     df_daily = df.groupby(["item_id", "sku", "timestamp"]).agg(agg_dict).reset_index()
 
     
-    all_items = df_daily["item_id"].unique()
-    date_range = pd.date_range(start=df_daily["timestamp"].min(), end=df_daily["timestamp"].max(), freq='D')
+    all_items = df_daily["item_id"].unique().tolist()
+    date_range = pd.date_range(start=df_daily["timestamp"].min(), end=df_daily["timestamp"].max(), freq='D').tolist()
     multi_index = pd.MultiIndex.from_product([all_items, date_range], names=["item_id", "timestamp"])
     regularized_data = pd.DataFrame(index=multi_index).reset_index()
     regularized_data = pd.merge(regularized_data, df_daily, on=["item_id", "timestamp"], how="left")
