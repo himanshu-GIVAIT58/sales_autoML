@@ -45,11 +45,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r src/requirements.txt
 
-      - name: Verify MongoDB connection
-        run: |
-          sleep 10
-          mongosh "mongodb://root:example@localhost:27017" --eval "db.adminCommand({ ping: 1 })"
-
       - name: Run training script
         env:
           MONGO_URI: mongodb://root:example@localhost:27017/
