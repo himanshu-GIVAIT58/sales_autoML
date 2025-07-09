@@ -14,14 +14,14 @@ STORE_COUNT_COLLECTION = "store_count"
 MASTER_RESULTS_COLLECTION = "advanced_forecast_master"
 DAILY_FORECASTS_COLLECTION = "advanced_forecast_daily"
 
-MAX_SKUS_TO_PROCESS = 2      # Only process 2 SKUs
-MAX_SKUS_FOR_CLUSTERING = 2  # Only cluster 2 SKUs
-MAX_WORKERS = 1              # Only 1 worker (avoid parallel overhead)
-MIN_DATA_POINTS_DEEP_LEARNING = 30  # Lower for quick test
+MAX_SKUS_TO_PROCESS = 2      
+MAX_SKUS_FOR_CLUSTERING = 2  
+MAX_WORKERS = 1              
+MIN_DATA_POINTS_DEEP_LEARNING = 30  
 MIN_DATA_POINTS_PROPHET = 30
-TEST_DAYS = 7                # Shorter test period
+TEST_DAYS = 7                
 SPORADIC_THRESHOLD = 0.60
-SMA_WINDOW = 7               # Shorter window for SMA
+SMA_WINDOW = 7               
 ENSEMBLE_WAPE_THRESHOLD = 50.0
 HOLIDAY_TYPES = ['National holiday', 'Optional holiday']
 
@@ -29,8 +29,8 @@ LSTM_CONFIG = {'n_steps': 2, 'epochs': 1, 'batch_size': 8, 'max_trials': 1}
 CNN_LSTM_CONFIG = {'n_steps': 2, 'epochs': 1, 'batch_size': 8, 'max_trials': 1}
 TRANSFORMER_CONFIG = {'n_steps': 2, 'epochs': 1, 'batch_size': 8, 'max_trials': 1}
 PROPHET_TUNING_PARAMS = {
-    'changepoint_prior_scale': [0.05],   # Only 1 value
-    'seasonality_prior_scale': [1.0]     # Only 1 value
+    'changepoint_prior_scale': [0.05],   
+    'seasonality_prior_scale': [1.0]     
 }
 
 INVENTORY_CONFIG = {
@@ -41,7 +41,7 @@ INVENTORY_CONFIG = {
     'ordering_cost_percentage': 0.30
 }
 
-MC_DROPOUT_SAMPLES = 5      # Fewer MC samples
+MC_DROPOUT_SAMPLES = 5      
 QUANTILES = [0.1, 0.5, 0.9]
-DTW_N_CLUSTERS = 2          # Fewer clusters
-DTW_N_JOBS = 1              # Only 1 job for clustering
+DTW_N_CLUSTERS = 2          
+DTW_N_JOBS = 1              

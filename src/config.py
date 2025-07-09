@@ -1,8 +1,8 @@
 
 import os 
 
-ORDERING_COST = 20.0
-ANNUAL_HOLDING_COST_PER_UNIT = 3.0
+ORDERING_COST = 10
+ANNUAL_HOLDING_COST_PER_UNIT = 20
 LEAD_TIME_DAYS = 40
 MINIMUM_ORDER_QUANTITY = 10
 
@@ -22,8 +22,11 @@ ABC_CONFIG = {
     'service_level_C': 0.90,
 }
 
+MIN_SEASONAL_STRENGTH = 0.6 # Adjust this threshold based on your data/domain
+SEASONAL_PERIOD_DAYS = 365 # For annual seasonality on daily data. Use 7 for weekly.
 
-MAX_SKUS = 1000
+
+MAX_SKUS = 200
 PREDICTION_LENGTH = 183
 
 KNOWN_COVARIATES_NAMES = [
@@ -42,10 +45,10 @@ TIMESTAMP_COL = 'timestamp'
 TARGET_COL = 'target'
 ITEM_ID_COL = 'sku'
 
-AUTOGLUON_PRESETS = "best_quality"
-TIME_LIMIT = 180 
+AUTOGLUON_PRESETS = "fast_training"  
+TIME_LIMIT = 360
 NUM_VAL_WINDOWS = 5
-EVAL_METRIC = "MAE"
+EVAL_METRIC = "MASE"
 FREQ = "D"
 QUANTILE_LEVELS = [0.1, 0.25, 0.5, 0.75, 0.9]
 TARGET_COLUMN = "target"
