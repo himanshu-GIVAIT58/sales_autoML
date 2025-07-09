@@ -1,30 +1,15 @@
-
-"""
-This module handles all interactions with the AutoGluon TimeSeriesPredictor.
-It now includes both a full-pipeline prediction method for batch runs and a
-new, fast prediction method for on-demand forecasts from user uploads.
-"""
-
 import pandas as pd
 import os
+from typing import Optional
 import joblib  
 from autogluon.timeseries import TimeSeriesPredictor, TimeSeriesDataFrame
-
-
 from src import config
 from src.feature_engineering import create_seasonal_features, prepare_data, generate_static_features, create_inventory_features, create_price_elasticity_features, create_trend_features
 
 def train_predictor(ts_data, config):
-    """
-    Trains a TimeSeriesPredictor. AutoGluon will automatically fine-tune
-    an existing model if one is found at config.MODEL_SAVE_PATH.
-    """
     try:
         print("\nTraining or fine-tuning forecasting models...")
         os.makedirs(config.MODEL_SAVE_PATH, exist_ok=True)
-
-        
-        
         predictor = TimeSeriesPredictor(
             prediction_length=config.PREDICTION_LENGTH,
             path=config.MODEL_SAVE_PATH,
@@ -39,9 +24,7 @@ def train_predictor(ts_data, config):
             presets=config.AUTOGLUON_PRESETS,
             time_limit=config.TIME_LIMIT,
             num_val_windows=config.NUM_VAL_WINDOWS,
-
         )
-
         print("Model training completed.")
         return predictor
     except Exception as e:
@@ -55,18 +38,12 @@ def evaluate_predictor(predictor, ts_data):
         print(leaderboard)
 
         print("\n--- Detailed Error Metrics ---")
-        
-        
         evaluation_summary = predictor.evaluate(ts_data, display=False)
         print(evaluation_summary)
-
-        
         return evaluation_summary
     except Exception as e:
         print(f"❌ Error during model evaluation: {e}")
         raise
-
-from typing import Optional
 
 def load_latest_predictor(model_path: Optional[str] = None):
     try:
@@ -83,11 +60,9 @@ def load_latest_predictor(model_path: Optional[str] = None):
 def make_predictions(predictor, ts_data=None, holidays_df=None, user_uploaded_data=None):
     if predictor is None:
         raise ValueError("A trained predictor object must be provided.")
-
     try:
         print("\n🐌 Running SLOW prediction process (full pipeline)...")
 
-        
         if user_uploaded_data is not None:
             print("  -> Adapting uploaded data to the main pipeline format...")
             source_df = user_uploaded_data.copy()
@@ -157,13 +132,50 @@ def prepare_prediction_data(user_data_raw, holidays_df):
     """Enriches the raw user-uploaded data with all necessary features."""
     user_data = user_data_raw.copy()
     user_data['timestamp'] = pd.to_datetime(user_data['timestamp'])
+
+    # --- Robust holiday merge ---
+    holidays_df = holidays_df.copy()
+    # Make all columns lowercase for matching
+    holidays_df.columns = holidays_df.columns.str.lower()
+    # Create 'timestamp' from 'date' or 'date'/'Date'
+    if 'timestamp' not in holidays_df.columns:
+        if 'date' in holidays_df.columns:
+            holidays_df['timestamp'] = pd.to_datetime(holidays_df['date'], errors='coerce')
+        elif 'date' in [c.lower() for c in holidays_df.columns]:
+            # fallback for any case
+            date_col = [c for c in holidays_df.columns if c.lower() == 'date'][0]
+            holidays_df['timestamp'] = pd.to_datetime(holidays_df[date_col], errors='coerce')
+        else:
+            holidays_df['timestamp'] = pd.NaT
+    if 'is_holiday' not in holidays_df.columns:
+        holidays_df['is_holiday'] = 1
+
+    print('user_data_before',user_data.columns.tolist())
+
     user_data = create_seasonal_features(user_data)
-    user_data = pd.merge(user_data, holidays_df[['timestamp', 'is_holiday']], on='timestamp', how='left').fillna({'is_holiday': 0})
+
+    print('user_data_after',user_data.columns.tolist())
+
+    user_data = pd.merge(
+        user_data,
+        holidays_df[['timestamp', 'is_holiday']],
+        on='timestamp',
+        how='left'
+    ).fillna({'is_holiday': 0})
+
+    print('user_data_after_merge',user_data.columns.tolist())
+
     user_data['warehouse_qty'] = 1
     user_data = create_inventory_features(user_data)
-    user_data = create_price_elasticity_features(user_data)
+    print('user_data_create_inventory',user_data.columns.to_list())
+
+    # user_data = create_price_elasticity_features(user_data)
+    # print('user_data_price_elasticity',user_data)
+
     user_data['sku'] = user_data['sku'].astype(str)
     user_data = create_trend_features(user_data)
+    print('user_data_after_trend',user_data)
+
     for col in config.KNOWN_COVARIATES_NAMES:
         if col not in user_data.columns:
             user_data[col] = 0
@@ -189,11 +201,11 @@ def make_fast_predictions(predictor, user_uploaded_data):
     if predictor is None:
         raise ValueError("A trained predictor object must be provided.")
 
-    # 1. Load artifacts and prepare data
+    
     static_feature_columns, holidays_df = load_prediction_artifacts()
     enriched_data = prepare_prediction_data(user_uploaded_data, holidays_df)
 
-    # 2. Create TimeSeriesDataFrame
+    
     enriched_data['channel'] = 'Online'
     enriched_data['item_id'] = enriched_data['sku'].astype(str) + "_" + enriched_data['channel']
     static_features = generate_static_features(enriched_data, all_training_columns=static_feature_columns)
@@ -205,26 +217,22 @@ def make_fast_predictions(predictor, user_uploaded_data):
         static_features_df=static_features
     )
 
-    # 3. Evaluate performance (with safety check)
+    
     metrics = None
     min_series_length = ts_upload.index.get_level_values('item_id').value_counts().min()
     
     if min_series_length > predictor.prediction_length:
         print("  -> Data is long enough. Evaluating model performance...")
-        # --- KEY FIX ---
-        # Assign the direct output of evaluate() to metrics, without unpacking.
         metrics = predictor.evaluate(ts_upload, display=False)
     else:
         print(f"  -> Data is too short to evaluate. Skipping evaluation.")
         reason = f"Uploaded data history ({min_series_length} points) is not longer than the model's prediction length ({predictor.prediction_length} points)."
         metrics = pd.DataFrame([{"info": "Evaluation skipped", "reason": reason}])
-
-    # 4. Generate future forecast
     future_known_covariates = generate_future_covariates(predictor, ts_upload, holidays_df)
     predictions = predictor.predict(
         ts_upload,
         known_covariates=future_known_covariates
     )
-    
+
     print("✅ Forecasts and metrics generated successfully!")
     return predictions, metrics
