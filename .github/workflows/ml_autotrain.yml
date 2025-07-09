@@ -48,7 +48,7 @@ jobs:
       - name: Verify MongoDB connection
         run: |
           sleep 10
-          mongosh "mongodb://localhost:27017" --eval "db.adminCommand({ ping: 1 })"
+          mongosh "mongodb://root:example@localhost:27017" --eval "db.adminCommand({ ping: 1 })"
 
       - name: Run training script
         env:
