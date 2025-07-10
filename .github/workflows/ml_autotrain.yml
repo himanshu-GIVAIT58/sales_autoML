@@ -21,9 +21,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Compose
-        run: docker-compose --version
+      - name: Check Docker Compose version
+        run: docker compose version
 
       - name: Build and run training container
         run: |
-          docker-compose up --build --abort-on-container-exit --exit-code-from app
+          docker compose up --build --abort-on-container-exit --exit-code-from app
