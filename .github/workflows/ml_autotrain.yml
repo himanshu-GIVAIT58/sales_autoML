@@ -7,7 +7,7 @@ on:
       - "src/**"
       - "Dockerfile"
       - "docker-compose.yml"
-      - ".env"
+      - ".env.example"
       - ".github/workflows/**"
   schedule:
     - cron: "0 0 1 * *"
@@ -20,6 +20,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Prepare .env
+        run: cp .env.example .env
 
       - name: Check Docker Compose version
         run: docker compose version
