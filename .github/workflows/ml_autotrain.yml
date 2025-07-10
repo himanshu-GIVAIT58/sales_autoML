@@ -1,4 +1,4 @@
-name: AutoML Retrain on Data Update
+name: AutoML Retrain Pipeline
 
 on:
   push:
@@ -21,12 +21,49 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
       - name: Prepare .env
         run: cp .env.example .env
 
       - name: Check Docker Compose version
         run: docker compose version
 
-      - name: Build and run training container
+      - name: Build training image
         run: |
-          docker compose up --build --abort-on-container-exit --exit-code-from app
+          docker compose build
+
+      - name: Run training container
+        run: |
+          docker compose up --abort-on-container-exit --exit-code-from app
+
+      - name: Copy trained models from container
+        if: success()
+        run: |
+          CONTAINER_ID=$(docker ps -a -q --filter "name=sales_automl_app")
+          docker cp $CONTAINER_ID:/app/autogluon_models ./autogluon_models
+
+      - name: Upload trained model as artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-autogluon-model
+          path: ./autogluon_models
+
+      # (Optional) Notify team of success or failure
+      # - name: Notify Slack
+      #   uses: slackapi/slack-github-action@v1
+      #   with:
+      #     payload: |
+      #       {
+      #         "text": "✅ AutoML retraining completed successfully."
+      #       }
