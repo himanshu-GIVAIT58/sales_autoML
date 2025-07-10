@@ -1,52 +1,29 @@
 name: AutoML Retrain on Data Update
 
 on:
-  # Re-train when relevant files are pushed
   push:
     paths:
       - "requirements.txt"
       - "src/**"
+      - "Dockerfile"
+      - "docker-compose.yml"
       - ".env"
       - ".github/workflows/**"
-
-  # Monthly scheduled retrain
   schedule:
-    - cron: "0 0 1 * *"  # At 00:00 on the 1st of each month
-
-  # Manual trigger
+    - cron: "0 0 1 * *"
   workflow_dispatch:
 
 jobs:
   retrain:
     runs-on: ubuntu-latest
 
-    services:
-      mongodb:
-        image: mongo:6.0
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --eval 'db.adminCommand({ ping: 1 })'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Set up Docker Compose
+        run: docker-compose --version
 
-      - name: Install dependencies
+      - name: Build and run training container
         run: |
-          python -m pip install --upgrade pip
-          pip install -r src/requirements.txt
-
-      - name: Run training script
-        env:
-          MONGO_URI: mongodb://root:example@localhost:27017/
-          MONGO_DB: sales_automl
-        run: python -m src.main
+          docker-compose up --build --abort-on-container-exit --exit-code-from app
