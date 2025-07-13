@@ -9,9 +9,7 @@ DATABASE_NAME = "sales_automl"
 OUTPUT_FILE = "mongo_data.json.bz2"  
 
 def custom_serializer(obj):
-    """
-    Custom serializer for non-serializable objects like datetime.
-    """
+  
     if isinstance(obj, datetime):
         return obj.isoformat()  
     raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")

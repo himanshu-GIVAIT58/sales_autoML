@@ -6,7 +6,7 @@ def calculate_seasonal_strength(
     series: pd.Series, 
     period: int, 
     model: str = 'additive',
-    fill_method: str = 'interpolate'  # new param for flexibility
+    fill_method: str = 'interpolate'  
 ) -> float:
     """
     Calculates the strength of seasonality in a time series.
@@ -20,16 +20,16 @@ def calculate_seasonal_strength(
     Returns:
         float: Seasonal strength (0 to 1).
     """
-    # Check minimum data
+    
     if series.isnull().all() or len(series.dropna()) < 2 * period:
         return np.nan
 
     try:
-        # Ensure datetime index
+        
         if not isinstance(series.index, pd.DatetimeIndex):
             series.index = pd.to_datetime(series.index)
 
-        # Fill missing dates
+        
         full_range_idx = pd.date_range(start=series.index.min(), end=series.index.max(), freq='D')
         series_reindexed = series.reindex(full_range_idx)
 
@@ -42,15 +42,15 @@ def calculate_seasonal_strength(
         else:
             raise ValueError(f"Invalid fill_method: {fill_method}")
 
-        # If all zeros or NaNs
+        
         if series_filled.sum() == 0 or series_filled.isnull().all():
             return np.nan
 
-        # For multiplicative model, no zeros allowed
+        
         if model == 'multiplicative':
             series_filled = series_filled.replace(0, 1e-6)
 
-        # Decompose
+        
         decomposition = seasonal_decompose(
             series_filled,
             model=model,
@@ -61,7 +61,7 @@ def calculate_seasonal_strength(
         seasonal_variation = np.var(decomposition.seasonal.dropna())
         remainder_variation = np.var(decomposition.resid.dropna())
 
-        # Avoid division by zero
+        
         if (seasonal_variation + remainder_variation) == 0:
             return 0.0
 
@@ -83,22 +83,6 @@ def identify_seasonal_skus(
     model: str = 'additive',
     fill_method: str = 'interpolate'
 ) -> pd.DataFrame:
-    """
-    Identifies SKUs with significant seasonality.
-
-    Args:
-        sales_data (pd.DataFrame): Sales history.
-        min_seasonal_strength (float): Threshold to classify as seasonal.
-        period_days (int): Seasonality period.
-        time_col (str): Time column name.
-        id_col (str): SKU column name.
-        target_col (str): Sales column name.
-        model (str): Decomposition model ('additive' or 'multiplicative').
-        fill_method (str): How to fill missing dates.
-
-    Returns:
-        pd.DataFrame: SKU seasonality metrics.
-    """
     print(
         f"\n❄️ Identifying seasonal SKUs with period={period_days} days, "
         f"min_seasonal_strength={min_seasonal_strength}, model={model}..."
