@@ -1,4 +1,3 @@
-
 import os 
 
 ORDERING_COST = 10
@@ -22,12 +21,13 @@ ABC_CONFIG = {
     'service_level_C': 0.90,
 }
 
-MIN_SEASONAL_STRENGTH = 0.6 # Adjust this threshold based on your data/domain
-SEASONAL_PERIOD_DAYS = 365 # For annual seasonality on daily data. Use 7 for weekly.
+MIN_SEASONAL_STRENGTH = 0.6 
+SEASONAL_PERIOD_DAYS = 365 
 
 
-MAX_SKUS = 200
+MAX_SKUS = 1000
 PREDICTION_LENGTH = 183
+RANDOM_SEED= 42
 
 KNOWN_COVARIATES_NAMES = [
     'was_stocked_out', 'is_holiday', 'is_on_promotion', 'month', 'day_of_week',
@@ -46,7 +46,7 @@ TARGET_COL = 'target'
 ITEM_ID_COL = 'sku'
 
 AUTOGLUON_PRESETS = "fast_training"  
-TIME_LIMIT = 360
+TIME_LIMIT = 180
 NUM_VAL_WINDOWS = 5
 EVAL_METRIC = "MASE"
 FREQ = "D"

@@ -18,8 +18,10 @@ logger = logging.getLogger(__name__)
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:example@localhost:27017/")
 MONGO_DB_NAME = os.getenv("MONGO_DB", "sales_automl")
 
+from typing import Iterator
+
 @contextmanager
-def get_mongo_client(mongo_uri: str = MONGO_URI) -> MongoClient:
+def get_mongo_client(mongo_uri: str = MONGO_URI) -> Iterator[MongoClient]:
     """Provides a MongoDB client connection as a context manager."""
     client = None
     try:
@@ -34,6 +36,14 @@ def get_mongo_client(mongo_uri: str = MONGO_URI) -> MongoClient:
         if client:
             client.close()
             logger.info("MongoDB connection closed.")
+            
+def get_latest_model_metrics():
+    client = MongoClient(os.getenv("MONGO_URI", "mongodb://root:example@localhost:27017/"))
+    db = client[os.getenv("MONGO_DB", "sales_automl")]
+    latest_run = db.model_runs.find_one(sort=[("trained_date", -1)])
+    if latest_run and "performance_metrics" in latest_run:
+        return latest_run["performance_metrics"]
+    return None
 
 def save_dataframe_to_mongo(df: pd.DataFrame, collection_name: str, mongo_uri: str = MONGO_URI, db_name: str = MONGO_DB_NAME):
     """Saves a DataFrame to a specified MongoDB collection, clearing old data first."""

@@ -11,21 +11,18 @@ MONGO_DB = os.getenv("MONGO_DB", "sales_automl")
 
 
 DATA_FILES = {
-    "Expected Delivery Date - Base.csv": "expected_delivery",
-    "indian_holidays.csv": "holidays_data",
-    "query_result_2025-05-28T18_02_43.550629445+05_30 (1).csv": "query_result",
-    "store_count.csv": "store_count",
-    "sales_data_complete___daily_drill_down_2025-05-29T12_37_43.113222731+05_30 (1).csv": "sales_data",
-    "mongo_data.json": "all_collections",  
+    "inventory_recommendations.csv": "inventory_recommendations_20250710_113711",
+    # "indian_holidays.csv": "holidays_data",
+    # "query_result_2025-05-28T18_02_43.550629445+05_30 (1).csv": "query_result",
+    # "store_count.csv": "store_count",
+    # "sales_data_complete___daily_drill_down_2025-05-29T12_37_43.113222731+05_30 (1).csv": "sales_data",
+    # "mongo_data.json": "all_collections",  
 }
 
 
 DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "data"))
-
+print(DATA_DIR)
 def save_file_to_mongo(file_path, collection_name):
-    """
-    Reads a CSV or JSON file and inserts its data into a MongoDB collection.
-    """
     print(f"Processing {file_path} -> {collection_name}")
     try:
         client = MongoClient(MONGO_URI)
@@ -72,10 +69,24 @@ def save_file_to_mongo(file_path, collection_name):
     finally:
         client.close()
 
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongodb:27017/")
+MONGO_DB = os.getenv("MONGO_DB", "sales_automl")
+
+def delete_inventory_recommendations_collections():
+    client = MongoClient(MONGO_URI)
+    db = client[MONGO_DB]
+    collections = db.list_collection_names()
+    deleted = []
+    for name in collections:
+        if name.startswith("inventory_recommendations_") and name != "inventory_recommendations":
+            db.drop_collection(name)
+            deleted.append(name)
+    client.close()
+    print(f"Deleted collections: {deleted}")
+
+
 def main():
-    """
-    Iterates over the defined data files and uploads their data to MongoDB.
-    """
+    delete_inventory_recommendations_collections()
     for filename, collection_name in DATA_FILES.items():
         file_path = os.path.join(DATA_DIR, filename)
         if os.path.exists(file_path):

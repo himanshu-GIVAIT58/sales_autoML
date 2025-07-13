@@ -18,12 +18,14 @@ def train_predictor(ts_data, config):
             freq=config.FREQ,
             eval_metric=config.EVAL_METRIC,
             quantile_levels=config.QUANTILE_LEVELS
+
         )
         predictor.fit(
             ts_data,
             presets=config.AUTOGLUON_PRESETS,
             time_limit=config.TIME_LIMIT,
             num_val_windows=config.NUM_VAL_WINDOWS,
+            # random_seed=config.RANDOM_SEED
         )
         print("Model training completed.")
         return predictor
@@ -133,16 +135,16 @@ def prepare_prediction_data(user_data_raw, holidays_df):
     user_data = user_data_raw.copy()
     user_data['timestamp'] = pd.to_datetime(user_data['timestamp'])
 
-    # --- Robust holiday merge ---
+    
     holidays_df = holidays_df.copy()
-    # Make all columns lowercase for matching
+    
     holidays_df.columns = holidays_df.columns.str.lower()
-    # Create 'timestamp' from 'date' or 'date'/'Date'
+    
     if 'timestamp' not in holidays_df.columns:
         if 'date' in holidays_df.columns:
             holidays_df['timestamp'] = pd.to_datetime(holidays_df['date'], errors='coerce')
         elif 'date' in [c.lower() for c in holidays_df.columns]:
-            # fallback for any case
+            
             date_col = [c for c in holidays_df.columns if c.lower() == 'date'][0]
             holidays_df['timestamp'] = pd.to_datetime(holidays_df[date_col], errors='coerce')
         else:
@@ -169,8 +171,8 @@ def prepare_prediction_data(user_data_raw, holidays_df):
     user_data = create_inventory_features(user_data)
     print('user_data_create_inventory',user_data.columns.to_list())
 
-    # user_data = create_price_elasticity_features(user_data)
-    # print('user_data_price_elasticity',user_data)
+    
+    
 
     user_data['sku'] = user_data['sku'].astype(str)
     user_data = create_trend_features(user_data)
@@ -193,11 +195,6 @@ def generate_future_covariates(predictor, ts_data, holidays_df):
 
 
 def make_fast_predictions(predictor, user_uploaded_data):
-    """
-    Orchestrates the fast prediction process, from loading artifacts
-    to safely evaluating and forecasting. This function always returns
-    a tuple of (predictions, metrics).
-    """
     if predictor is None:
         raise ValueError("A trained predictor object must be provided.")
 
