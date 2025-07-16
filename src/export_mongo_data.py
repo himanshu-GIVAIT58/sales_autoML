@@ -2,11 +2,11 @@ import bz2
 import json
 from pymongo import MongoClient
 from datetime import datetime
+from src import dbConnect
 
-
-MONGO_URI = "mongodb://root:example@localhost:27017/"
-DATABASE_NAME = "sales_automl"
-OUTPUT_FILE = "mongo_data.json.bz2"  
+MONGO_URI = dbConnect.connection_uri
+DATABASE_NAME = dbConnect.mongo_db_name
+OUTPUT_FILE = "mongo_data.json.bz2"
 
 def custom_serializer(obj):
   

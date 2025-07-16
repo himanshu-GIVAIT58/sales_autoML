@@ -4,7 +4,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from autogluon.timeseries import TimeSeriesDataFrame
 import joblib
-
+from src import incremental_utils
 from src import config
 from src import data_loader
 from src import feature_engineering
@@ -20,16 +20,16 @@ def main():
     try:
         sales_df = data_loader.load_dataframe_from_mongo("sales_data")
         print(f"   -> Loaded {len(sales_df)} historical sales records.")
-        # new_sales_df = data_loader.load_dataframe_from_mongo("new_sales_data_uploads")
-        # if not new_sales_df.empty:
-        #     print(f"   -> Found {len(new_sales_df)} new records to integrate.")
-        #     new_sales_df.rename(columns={'sku': 'item_id', 'timestamp': 'order_date', 'disc': 'discount_percentage'}, inplace=True)
-        #     new_sales_df['order_date'] = pd.to_datetime(new_sales_df['order_date'])
-        #     sales_df = pd.concat([sales_df, new_sales_df], ignore_index=True)
-        #     sales_df.drop_duplicates(subset=['item_id', 'order_date'], keep='last', inplace=True)
-        #     print(f"   -> Combined dataset now has {len(sales_df)} unique records.")
-        # else:
-        #     print("   -> No new sales data found.")
+        new_sales_df = data_loader.load_dataframe_from_mongo("new_sales_data_uploads")
+        if not new_sales_df.empty:
+            print(f"   -> Found {len(new_sales_df)} new records to integrate.")
+            new_sales_df.rename(columns={'sku': 'item_id', 'timestamp': 'order_date', 'disc': 'discount_percentage'}, inplace=True)
+            new_sales_df['order_date'] = pd.to_datetime(new_sales_df['order_date'])
+            sales_df = pd.concat([sales_df, new_sales_df], ignore_index=True)
+            sales_df.drop_duplicates(subset=['item_id', 'order_date'], keep='last', inplace=True)
+            print(f"   -> Combined dataset now has {len(sales_df)} unique records.")
+        else:
+            print("   -> No new sales data found.")
         inventory_df = data_loader.load_dataframe_from_mongo("query_result")
         holidays_df = data_loader.load_dataframe_from_mongo("holidays_data")
         print("   -> Successfully loaded inventory and holidays data.")
@@ -37,15 +37,38 @@ def main():
         print(f"❌ Critical Error: Failed to load data. Aborting. Error: {e}")
         return
 
+    # print("\nStep 1b: Checking for data drift...")
+    # try:
+    #     prev_data = data_loader.load_dataframe_from_mongo("processed_training_data")
+    #     # NEW: Print drift check parameters
+    #     print(f"   -> Using drift thresholds: mean_threshold={config.DRIFT_MEAN_THRESHOLD}, p_value_threshold={config.DRIFT_P_VALUE_THRESHOLD}")
+    #     drift_detected = model_monitor.check_for_drift(
+    #         previous_data=prev_data,
+    #         new_data=sales_df,
+    #         mean_threshold=config.DRIFT_MEAN_THRESHOLD,
+    #         p_value_threshold=config.DRIFT_P_VALUE_THRESHOLD
+    #     )
+    #     if drift_detected:
+    #         print("   -> ⚠️ Drift detected in incoming data. Proceeding with retraining.")
+    #     else:
+    #         print("   -> ✅ No significant drift detected.")
+    # except Exception as e:
+    #     print(f"   -> ⚠️ Drift detection skipped (error: {e})")
+
     print("\nStep 2: Preparing data and running feature engineering...")
+    # NEW: Print input parameter
+    print(f"   -> Processing data for a maximum of {config.MAX_SKUS} SKUs.")
     processed_data, static_features_base = feature_engineering.prepare_data(
         sales_df, inventory_df, holidays_df, config.MAX_SKUS
     )
-    print("   -> Feature engineering complete.")
+    # NEW: Print output shape
+    print(f"   -> Generated {len(processed_data)} rows after feature engineering.")
     data_loader.save_dataframe_to_mongo(processed_data, "processed_training_data")
     print("   -> Saved processed training data snapshot to MongoDB.")
 
     print("\nStep 3: Performing ABC Analysis and data filtering...")
+    # NEW: Print ABC configuration
+    print(f"   -> Using ABC class cutoffs: A={config.ABC_CONFIG['A_class_percentage']*100}%, B={config.ABC_CONFIG['B_class_percentage']*100}%")
     total_sales = processed_data.groupby('sku')['target'].sum().sort_values(ascending=False)
     total_sales_df = total_sales.to_frame()
     a_cutoff = int(len(total_sales_df) * config.ABC_CONFIG['A_class_percentage'])
@@ -54,33 +77,69 @@ def main():
     total_sales_df.loc[total_sales_df.index[:a_cutoff], 'class'] = 'A'
     total_sales_df.loc[total_sales_df.index[a_cutoff:b_cutoff], 'class'] = 'B'
     item_to_class_map = total_sales_df['class'].to_dict()
+    # NEW: Print ABC results
+    class_counts = total_sales_df['class'].value_counts()
+    print(f"   -> ABC Analysis Results: Class A={class_counts.get('A', 0)}, Class B={class_counts.get('B', 0)}, Class C={class_counts.get('C', 0)}")
+    
+    # NEW: Print filtering parameter
+    print(f"   -> Filtering for items with history > prediction length ({config.PREDICTION_LENGTH} days).")
     item_counts = processed_data["item_id"].value_counts()
     items_with_sufficient_data = item_counts[item_counts > config.PREDICTION_LENGTH].index
-    filtered_data = processed_data[processed_data["item_id"].isin(items_with_sufficient_data)]
+    data_with_history = processed_data[processed_data["item_id"].isin(items_with_sufficient_data)]
+    skus_to_train = incremental_utils.get_skus_to_train(data_with_history)
+    
+    if not skus_to_train:
+        print("✅ All SKUs up to date. No retraining needed.")
+        return
+    
     print(f"   -> Number of SKU-channel combos with sufficient history: {len(items_with_sufficient_data)}")
+    print(f"   -> SKUs to retrain (new data detected): {len(skus_to_train)}")
+    filtered_data = data_with_history[data_with_history["item_id"].isin(skus_to_train)]
+    
 
     print("\nStep 4: Preparing data for AutoGluon TimeSeriesDataFrame...")
     for col in config.KNOWN_COVARIATES_NAMES:
         if col not in filtered_data.columns:
             filtered_data[col] = 0
     final_static_features = static_features_base.reset_index()
+    # NEW: Print static feature count
+    print(f"   -> Preparing data with {len(final_static_features.columns) - 1} static features.")
     ts_data = TimeSeriesDataFrame.from_data_frame(
         filtered_data,
         id_column="item_id",
         timestamp_column="timestamp",
         static_features_df=final_static_features
     )
-    print(" -> TimeSeriesDataFrame created successfully.")
+    print("   -> TimeSeriesDataFrame created successfully.")
 
     print("\nStep 5: Training or fine-tuning the model...")
+    # NEW: Print key training parameters
+    print(f"   -> Training with presets: '{config.AUTOGLUON_PRESETS}', time limit: {config.TIME_LIMIT}s.")
     predictor = model_handler.train_predictor(ts_data, config)
     print("   -> Model training/retraining complete. Evaluating...")
     metrics = model_handler.evaluate_predictor(predictor, ts_data)
     if metrics is None:
-        metrics = {'MAE': 999}
-    print(f"   -> Model evaluation metrics: {metrics}")
+        metrics = {'MASE': 999} 
+    
+    mase = metrics.get('MASE', 'N/A')
+    rmse = metrics.get('RMSE', 'N/A')
+    mape = metrics.get('MAPE', 'N/A')
+    print(f"   -> 📈 Model evaluation metrics: MASE={mase:.4%}, RMSE={rmse:.2%}, MAPE={mape:.2%}")
 
-    print("\nStep 6: Saving training artifacts for fast prediction...")
+    trained_date = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    new_collection_name = f"inventory_recommendations_{trained_date}"
+
+    print("\nStep 6: Logging model run...")
+    print(f"   -> Logging model run with unique ID: {trained_date}") # NEW
+    model_monitor.log_model_run(
+        predictor=predictor,
+        collection_name=new_collection_name,
+        performance_metrics=metrics,
+        data_snapshot_info={"data_rows": len(processed_data)},
+        trigger_source="manual_main_run"
+    )
+
+    print("\nStep 7: Saving training artifacts for fast prediction...")
     os.makedirs(config.ARTIFACTS_PATH, exist_ok=True)
     static_feature_columns = list(final_static_features.drop(columns=['item_id']).columns)
     joblib.dump(static_feature_columns, os.path.join(config.ARTIFACTS_PATH, 'static_feature_columns.joblib'))
@@ -92,23 +151,32 @@ def main():
     holidays_df_for_future.drop_duplicates(subset=['timestamp']).to_csv(os.path.join(config.ARTIFACTS_PATH, 'holidays.csv'), index=False)
     print("   -> Saved holidays data.")
 
-    print("\nStep 7: Generating recommendations...")
+    print("\nStep 8: Generating recommendations...")
     predictions = model_handler.make_predictions(predictor, ts_data, holidays_df_for_future)
     recommendations_df = inventory_calculator.generate_recommendations(predictions, item_to_class_map, config)
     final_recommendations = inventory_calculator.apply_business_rules(recommendations_df)
-    trained_date = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    new_collection_name = f"inventory_recommendations_{trained_date}"
+    # NEW: Print number of recommendations
+    print(f"   -> Generated {len(final_recommendations)} recommendation rows.")
     data_loader.save_dataframe_to_mongo(final_recommendations, new_collection_name)
     print(f"   -> Saved new recommendations to collection: '{new_collection_name}'")
 
-    print("\nStep 8: Logging model run...")
-    model_monitor.log_model_run(
-        predictor=predictor,
-        collection_name=new_collection_name,
-        performance_metrics=metrics,
-        data_snapshot_info={"data_rows": len(processed_data)},
-        trigger_source="manual_main_run"
-    )
+    print("\nStep 9: Comparing model performance with previous runs...")
+    try:
+        # NEW: Print comparison parameter
+        print(f"   -> Comparing with previous models using an improvement threshold of {config.IMPROVEMENT_THRESHOLD*100}%.")
+        is_better = model_monitor.compare_model_performance(threshold_improvement=config.IMPROVEMENT_THRESHOLD)
+        if not is_better:
+            print("   -> ⚠️ New model underperformed. Rolling back to previous recommendations.")
+            restored_collection = model_monitor.rollback_to_previous_version()
+            if restored_collection:
+                print(f"   -> ✅ Rolled back. Active recommendations: '{restored_collection}'")
+            else:
+                print("   -> ⚠️ Rollback skipped or no previous version available.")
+
+        else:
+            print("   -> ✅ New model accepted as better.")
+    except Exception as e:
+        print(f"   -> ⚠️ Performance comparison skipped (error: {e})")
 
     print("-" * 60)
     print("✅ Unified Forecasting Pipeline Finished Successfully!")

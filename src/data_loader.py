@@ -8,17 +8,17 @@ from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-
+from urllib.parse import quote_plus
+from typing import Iterator
+from src import dbConnect
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:example@localhost:27017/")
-MONGO_DB_NAME = os.getenv("MONGO_DB", "sales_automl")
-
-from typing import Iterator
+MONGO_DB_NAME = dbConnect.mongo_db_name
+MONGO_URI = dbConnect.connection_uri
 
 @contextmanager
 def get_mongo_client(mongo_uri: str = MONGO_URI) -> Iterator[MongoClient]:
@@ -38,12 +38,38 @@ def get_mongo_client(mongo_uri: str = MONGO_URI) -> Iterator[MongoClient]:
             logger.info("MongoDB connection closed.")
             
 def get_latest_model_metrics():
-    client = MongoClient(os.getenv("MONGO_URI", "mongodb://root:example@localhost:27017/"))
-    db = client[os.getenv("MONGO_DB", "sales_automl")]
+    client = dbConnect.client
+    db = dbConnect.db
     latest_run = db.model_runs.find_one(sort=[("trained_date", -1)])
     if latest_run and "performance_metrics" in latest_run:
         return latest_run["performance_metrics"]
     return None
+
+def get_top_skus_by_forecast(
+    recommendations: pd.DataFrame, 
+    top_n: int = 5, 
+    months: int = 1
+) -> pd.DataFrame:
+    """
+    Returns the top N SKUs by forecasted demand for the given number of months.
+    """
+    if recommendations is None or recommendations.empty:
+        return pd.DataFrame(columns=['SKU', f'Forecasted Demand (Next {months}M)'])
+    
+    horizon_str = f"{months}-Month"
+    filtered = recommendations[recommendations['horizon'] == horizon_str]
+    top_skus = (
+        filtered.groupby('item_id')['total_forecasted_demand']
+        .sum()
+        .sort_values(ascending=False)
+        .head(top_n)
+        .reset_index()
+        .rename(columns={
+            'item_id': 'SKU', 
+            'total_forecasted_demand': f'Forecasted Demand (Next {months}M)'
+        })
+    )
+    return top_skus
 
 def save_dataframe_to_mongo(df: pd.DataFrame, collection_name: str, mongo_uri: str = MONGO_URI, db_name: str = MONGO_DB_NAME):
     """Saves a DataFrame to a specified MongoDB collection, clearing old data first."""
@@ -186,7 +212,6 @@ def load_latest_recommendation_data(mongo_uri: str = MONGO_URI, db_name: str = M
     if not latest_collection_name:
         return pd.DataFrame()
     return load_dataframe_from_mongo(latest_collection_name, mongo_uri=mongo_uri, db_name=db_name)
-
 
 def load_product_prices(mongo_uri, db_name, collection_name="sales_data"):
     print(f"Loading product prices from '{collection_name}'...")

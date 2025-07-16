@@ -8,16 +8,27 @@ from src.promo_analyzer import analyze_promotion_lift
 from src.model_handler import  prepare_prediction_data,load_latest_predictor,generate_future_covariates,generate_static_features,load_prediction_artifacts
 from pymongo import MongoClient
 from dotenv import load_dotenv
-from src.data_loader import load_latest_recommendation_data, get_last_n_months_sales,load_dataframe_from_mongo
+from src.data_loader import load_latest_recommendation_data, get_last_n_months_sales,load_dataframe_from_mongo,get_latest_model_metrics,get_top_skus_by_forecast
 from typing import Optional
 from src import config 
 from autogluon.timeseries import TimeSeriesDataFrame  
 from src.seasonal_analysis import identify_seasonal_skus,calculate_seasonal_strength
 from statsmodels.tsa.seasonal import seasonal_decompose
+from urllib.parse import quote_plus
+from src import dbConnect
+
 
 load_dotenv()
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://root:example@localhost:27017/")
+
+mongo_user = os.getenv("MONGO_USERNAME")
+mongo_pass = quote_plus(os.getenv("MONGO_PASSWORD", ""))
+mongo_host = os.getenv("MONGO_HOST")
+mongo_port = int(os.getenv("MONGO_PORT", 27017))
 MONGO_DB = os.getenv("MONGO_DB", "sales_automl")
+
+# Build the full, correct connection string
+MONGO_URI = f"mongodb://{mongo_user}:{mongo_pass}@{mongo_host}:{mongo_port}/"
+
 
 st.set_page_config(
     page_title="Inventory Recommendations Dashboard",
@@ -25,20 +36,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-def load_recommendation_data_from_mongo() -> Optional[pd.DataFrame]:
-    """
-    Loads the latest inventory recommendations from MongoDB using data_loader.
-    """
-    try:
-        df = load_latest_recommendation_data(mongo_uri=MONGO_URI, db_name=MONGO_DB)
-        if df.empty:
-            st.warning("No data found in the latest recommendations collection.")
-            return None
-        return df
-    except Exception as e:
-        st.error(f"⚠️ An error occurred while loading the latest recommendations: {str(e)}", icon="🚨")
-        return None
 
 def save_feedback_to_mongo(feedback_df: pd.DataFrame, collection_name="feedback_data", mongo_uri=MONGO_URI, db_name=MONGO_DB):
     """
@@ -72,83 +69,6 @@ def display_sku_overview(sku_data: pd.Series) -> None:
             st.markdown(f"**Safety Stock:** `{row['safety_stock']}`")
             st.markdown(f"**Reorder Point:** `{row['reorder_point']}`")
             st.markdown(f"**Order Quantity (EOQ):** `{row['economic_order_quantity (EOQ)']}`")
-
-def display_demand_chart(sku_data: pd.Series, historical_data: pd.DataFrame) -> None:
-    st.subheader("Demand Forecast Comparison", divider="gray")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        agg_sku_data = sku_data.groupby('horizon')['total_forecasted_demand'].sum().reset_index()
-
-        current_chart = alt.Chart(agg_sku_data).mark_bar(
-            cornerRadiusTopLeft=3,
-            cornerRadiusTopRight=3
-        ).encode(
-            x=alt.X('horizon:N', title='Forecast Horizon', sort=['1-Month', '3-Month', '6-Month']),
-            y=alt.Y('total_forecasted_demand:Q', title='Total Forecasted Demand (Units)'),
-            color=alt.Color('horizon:N', legend=None, scale=alt.Scale(scheme='viridis')),
-            tooltip=[
-                alt.Tooltip('horizon', title='Horizon'),
-                alt.Tooltip('total_forecasted_demand', title='Total Forecasted Demand', format=',.0f'),
-            ]
-        ).properties(
-            title='Total Demand by Forecast Horizon'
-        ).configure_axis(
-            labelFontSize=12,
-            titleFontSize=14
-        ).configure_title(
-            fontSize=16,
-            anchor='start'
-        )
-        st.altair_chart(current_chart, use_container_width=True)
-
-    
-    with col2:
-        demand_by_horizon = sku_data.groupby('horizon')['total_forecasted_demand'].sum()
-
-        d1 = demand_by_horizon.get('1-Month', 0)
-        d3 = demand_by_horizon.get('3-Month', 0)
-        d6 = demand_by_horizon.get('6-Month', 0)
-
-        
-        monthly_demands = []
-        
-        monthly_demands.append(d1)
-        
-        demand_month_2_3 = (d3 - d1) / 2 if d3 > d1 else 0
-        monthly_demands.extend([demand_month_2_3] * 2)
-        
-        demand_month_4_6 = (d6 - d3) / 3 if d6 > d3 else 0
-        monthly_demands.extend([demand_month_4_6] * 3)
-
-        
-        future_dates = [(datetime.today() + relativedelta(months=i)).strftime('%Y-%m') for i in range(6)]
-
-        
-        forecast_df = pd.DataFrame({
-            'Month': future_dates,
-            'Implied Monthly Demand': monthly_demands
-        })
-
-        
-        forecast_chart = alt.Chart(forecast_df).mark_line(point=True).encode(
-            x=alt.X('Month:N', title='Month', sort=None),
-            y=alt.Y('Implied Monthly Demand:Q', title='Implied Monthly Demand (Units)'),
-            tooltip=[
-                alt.Tooltip('Month', title='Month'),
-                alt.Tooltip('Implied Monthly Demand', title='Forecast Demand', format=',.0f')
-            ]
-        ).properties(
-            title='Implied Monthly Demand for Next 6 Months'
-        ).configure_axis(
-            labelFontSize=12,
-            titleFontSize=14
-        ).configure_title(
-            fontSize=16,
-            anchor='start'
-        )
-        st.altair_chart(forecast_chart, use_container_width=True)
 
 def display_chatbot(selected_sku: str, full_df: pd.DataFrame) -> None:
     """Displays a simple chatbot for asking questions."""
@@ -207,7 +127,6 @@ def save_feedback(selected_sku: str, sku_data: pd.DataFrame, feedback: str):
         st.error(f"⚠️ An error occurred while saving feedback: {str(e)}", icon="🚨")
 
 def capture_feedback(selected_sku: str, sku_data: pd.Series):
-    """Displays feedback buttons and saves the feedback to MongoDB."""
     st.subheader("Was this forecast helpful?", divider="green")
     
     feedback_col1, feedback_col2 = st.columns(2)
@@ -221,11 +140,10 @@ def capture_feedback(selected_sku: str, sku_data: pd.Series):
             save_feedback(selected_sku, sku_data, "Bad")
 
 st.sidebar.title("Navigation")
-page = st.sidebar.radio("Go to:", ["Recommendations", "Analyze Data", "New SKU Forecast","Promotion Analysis","Seasonal Analysis"])
+page = st.sidebar.radio("Go to:", ["Recommendations", "New SKU Forecast","Promotion Analysis","Seasonal Analysis","Executive Summary","Inventory Optimization"])
 
 if page == "Recommendations":
     reco_df = load_latest_recommendation_data()
-
     if reco_df is None or reco_df.empty:
         st.info("ℹ️ Awaiting recommendation data. Please ensure the main pipeline has run.", icon="⏳")
     else:
@@ -236,59 +154,45 @@ if page == "Recommendations":
 
         if selected_sku:
             st.header(f"Analysis for Item: `{selected_sku}`", divider="rainbow")
-            
-            
+
             sku_reco_data = reco_df[reco_df['item_id'] == selected_sku]
-            
-            
-            sku_historical_data = get_last_n_months_sales(sku_list=[selected_sku], quantity_col='qty', months_back=6)
+
+            last_1 = get_last_n_months_sales(sku_list=[selected_sku], quantity_col='qty', months_back=1)
+            last_3 = get_last_n_months_sales(sku_list=[selected_sku], quantity_col='qty', months_back=3)
+            last_6 = get_last_n_months_sales(sku_list=[selected_sku], quantity_col='qty', months_back=6)
+
             if sku_reco_data.empty:
                 st.error(f"No recommendation data found for item: {selected_sku}")
             else:
-                col1, col2 = st.columns(2)
+                col1, col2 ,col3 = st.columns(3)
                 with col1:
-                    total_historical = sku_historical_data['qty'].sum() if not sku_historical_data.empty else 0
-                    st.metric(label="Last 6-Month Actual Sales", value=f"{total_historical:,.0f} units")
+                    st.metric(label="Last 6-Month Actual Sales", value=f"{last_6['qty'].sum():,.0f} units")
                 with col2:
+                    st.metric(label="Last 3-Month Actual Sales", value=f"{last_3['qty'].sum():,.0f} units")
+                with col3:
+                    st.metric(label="Last 1-Month Actual Sales", value=f"{last_1['qty'].sum():,.0f} units")
+                with col1:
                     total_forecasted = sku_reco_data[sku_reco_data['horizon'] == '6-Month']['total_forecasted_demand'].sum()
                     st.metric(label="Next 6-Month Forecasted Sales", value=f"{total_forecasted:,.0f} units")
-
+                with col2:
+                    total_forecasted = sku_reco_data[sku_reco_data['horizon'] == '3-Month']['total_forecasted_demand'].sum()
+                    st.metric(label="Next 3-Month Forecasted Sales", value=f"{total_forecasted:,.0f} units")
+                with col3:
+                    total_forecasted = sku_reco_data[sku_reco_data['horizon'] == '1-Month']['total_forecasted_demand'].sum()
+                    st.metric(label="Next 1-Month Forecasted Sales", value=f"{total_forecasted:,.0f} units")
+                
                 display_sku_overview(sku_reco_data)
                 
-                display_demand_chart(sku_reco_data, sku_historical_data)
-
                 with st.expander("📋 View Raw Recommendation Data"):
                     st.dataframe(sku_reco_data, use_container_width=True, hide_index=True)
-
                 display_chatbot(selected_sku, reco_df)
                 st.markdown("---")
                 capture_feedback(selected_sku, sku_reco_data)
         else:
             st.info("Please select an item from the sidebar to see the detailed analysis.", icon="👈")
 
-elif page == "Analyze Data":
-    st.header("Analyze Data with EDA")
-    
-    eda_dir = os.path.join(config.PROJECT_SRC, "eda", "target")
-    if not os.path.isdir(eda_dir):
-        os.makedirs(eda_dir, exist_ok=True)
-        st.warning(f"Created EDA directory at: {eda_dir}")
-        st.info("Please run the EDA script to generate charts.")
-    else:
-        charts = sorted([f for f in os.listdir(eda_dir) if f.endswith(".png")])
-        if not charts:
-            st.warning("No PNG charts found in the EDA directory. Please run the EDA script first.")
-        else:
-            for chart in charts:
-                chart_path = os.path.join(eda_dir, chart)
-                try:
-                    st.image(chart_path, caption=chart, use_container_width=True)
-                except Exception as e:
-                    st.error(f"Failed to load chart {chart}: {str(e)}")
-
 elif page == "New SKU Forecast":
     st.header("📤 Forecast on New Data")
-
     st.info("""
     **Required CSV format:**
     - `sku`: Product identifier (e.g., A0215)
@@ -509,6 +413,48 @@ elif page == "Seasonal Analysis":
         default=["Valentine's Day", "Diwali", "Black Friday"]
     )
 
+    st.markdown("**Set Event Date and Range for Analysis**")
+    event_date_inputs = {}
+    event_range_inputs = {}
+
+    # Arrange event inputs in rows, each with 2 events (6 columns: event1-date, event1-before, event1-after, event2-date, event2-before, event2-after)
+    events_per_row = 2
+    num_rows = (len(selected_events) + events_per_row - 1) // events_per_row
+
+    for row in range(num_rows):
+        cols = st.columns(6)  # 6 columns for 2 events per row, 3 inputs each
+        for i in range(2):  # 2 events per row
+            idx = row * 2 + i
+            if idx < len(selected_events):
+                event = selected_events[idx]
+                with cols[i*3]:
+                    st.markdown(f"**{event}**")
+                with cols[i*3 + 1]:
+                    event_date = st.date_input(
+                        "Date",
+                        value=datetime.now(),
+                        key=f"{event}_date_{idx}"  # unique key
+                    )
+                with cols[i*3 + 2]:
+                    minus_days = st.number_input(
+                        "Days before",
+                        min_value=0,
+                        max_value=30,
+                        value=3,
+                        step=1,
+                        key=f"{event}_minus_{idx}"  # unique key
+                    )
+                    plus_days = st.number_input(
+                        "Days after",
+                        min_value=0,
+                        max_value=30,
+                        value=3,
+                        step=1,
+                        key=f"{event}_plus_{idx}"  # unique key
+                    )
+                event_date_inputs[event] = event_date
+                event_range_inputs[event] = (minus_days, plus_days)
+
     if st.button("🔍 Analyze SKUs", key='run_advanced_seasonal_analysis'):
         st.info(
             f"Analyzing seasonality with strength ≥ {seasonal_strength_threshold}, "
@@ -522,7 +468,7 @@ elif page == "Seasonal Analysis":
                 'sku': 'item_id',
                 'created_at': 'timestamp'
             })
-            sales_data['timestamp'] = pd.to_datetime(sales_data['timestamp'])
+            sales_data['timestamp'] = pd.to_datetime(sales_data['timestamp'], format='%d/%m/%Y', errors='coerce')
             analysis_data = sales_data.copy()
         except Exception as e:
             st.error(f"Failed to load sales data: {e}")
@@ -543,11 +489,14 @@ elif page == "Seasonal Analysis":
                     fill_method=fill_method
                 )
 
-                # Compute sales during special events
+                
                 event_sales_summary = []
                 for event_name in selected_events:
-                    start_mmdd, end_mmdd = sales_events[event_name]
-                    mask = analysis_data['timestamp'].dt.strftime("%m-%d").between(start_mmdd, end_mmdd)
+                    event_date = event_date_inputs[event_name]
+                    minus_days, plus_days = event_range_inputs[event_name]
+                    start_date = event_date - pd.Timedelta(days=minus_days)
+                    end_date = event_date + pd.Timedelta(days=plus_days)
+                    mask = (analysis_data['timestamp'] >= pd.Timestamp(start_date)) & (analysis_data['timestamp'] <= pd.Timestamp(end_date))
                     event_data = analysis_data.loc[mask]
                     event_agg = (
                         event_data.groupby('item_id')['target']
@@ -560,12 +509,13 @@ elif page == "Seasonal Analysis":
                     else:
                         event_sales_summary.append(event_agg)
 
-                # Combine with seasonal strength
+                
                 seasonal_df = seasonal_sku_info_df.copy()
+                print("Seasonal SKUs identified:", seasonal_df)
                 if event_sales_summary:
                     seasonal_df = seasonal_df.merge(event_sales_summary[0], on='item_id', how='left')
 
-                # Fill NaNs with 0
+                
                 seasonal_df = seasonal_df.fillna(0)
                 st.session_state['seasonal_skus'] = seasonal_df
 
@@ -643,3 +593,284 @@ elif page == "Seasonal Analysis":
 
     else:
         st.info("Run analysis to see seasonal insights.")
+
+elif page == "Executive Summary":
+    st.header("📈 Executive Summary Dashboard")
+    st.markdown("A high-level overview of critical business metrics.")
+    
+    reco_df = load_latest_recommendation_data()
+    model_metrics = get_latest_model_metrics()
+    sales_df = load_dataframe_from_mongo("sales_data")
+    
+    if model_metrics:
+        with st.container():
+            st.subheader("📈 Model Accuracy Metrics")
+            col1, col2, col3 = st.columns(3)
+            def safe_float_fmt(val, fmt):
+                try:
+                    return format(abs(float(val)), fmt)
+                except Exception:
+                    return str(val)
+
+            col1.metric("MASE", safe_float_fmt(model_metrics.get('MASE', 'N/A'), ".3f"),help=(
+        "MASE (Mean Absolute Scaled Error) compares the model's forecast error to a simple baseline (like last month's sales). "
+        "A value below 1 means the model is better than guessing last period's sales. "
+        "Example: MASE = 0.7 means the model is 30% better than the naive forecast."
+    ))
+            col2.metric("RMSE", safe_float_fmt(model_metrics.get('RMSE', 'N/A'), ".2f"),help=(
+        "RMSE (Root Mean Squared Error) shows the typical difference between predicted and actual sales, in units. "
+        "Lower is better. "
+        "Example: RMSE = 12 means, on average, the forecast is off by 12 units."
+    ))
+            col3.metric("MAPE", safe_float_fmt(model_metrics.get('MAPE', 'N/A'), ".2%"),help=(
+        "MAPE (Mean Absolute Percentage Error) shows the average error as a percentage of actual sales. "
+        "Lower is better. "
+        "Example: MAPE = 8% means forecasts are off by 8% on average."
+    ))
+            st.markdown("---")
+
+            col1, col2, col3 = st.columns(3)
+            sku_list = sorted(reco_df['item_id'].unique())
+            all_sku_last_6 = get_last_n_months_sales(sku_list=sku_list, quantity_col='qty', months_back=6)
+            all_sku_last_3 = get_last_n_months_sales(sku_list=sku_list, quantity_col='qty', months_back=3)
+            all_sku_last_1 = get_last_n_months_sales(sku_list=sku_list, quantity_col='qty', months_back=1)
+            col1.metric("All SKUs Last 6-Month Actual Sales", f"{all_sku_last_6['qty'].sum():,.0f} units")
+            col2.metric("All SKUs Last 3-Month Actual Sales", f"{all_sku_last_3['qty'].sum():,.0f} units")
+            col3.metric("All SKUs Last 1-Month Actual Sales", f"{all_sku_last_1['qty'].sum():,.0f} units")
+            
+            col1.metric("All SKUs Total Forecasted Demand (Next 6-Months)", f"{reco_df[reco_df['horizon'] == '6-Month']['total_forecasted_demand'].sum():,.0f} units")
+            col2.metric("All SKUs Total Forecasted Demand (Next 3-Months)", f"{reco_df[reco_df['horizon'] == '3-Month']['total_forecasted_demand'].sum():,.0f} units")
+            col3.metric("All SKUs Total Forecasted Demand (Next 1-Month)", f"{reco_df[reco_df['horizon'] == '1-Month']['total_forecasted_demand'].sum():,.0f} units")
+            st.markdown("---")
+           
+            st.subheader("📊 Top SKUs by Forecasted Demand", divider="blue")
+
+            # Add a number input for user to select top_n
+            top_n = st.number_input("Select number of top SKUs to display:", min_value=1, max_value=100, value=50, step=1)
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                st.markdown("**1-Month Forecast**")
+                top_1m = get_top_skus_by_forecast(reco_df, top_n=top_n, months=1)
+                if not top_1m.empty:
+                    # Only convert numeric columns to int
+                    for col in top_1m.select_dtypes(include='number').columns:
+                        top_1m[col] = top_1m[col].round(0).astype(int)
+                    st.dataframe(top_1m, use_container_width=True, hide_index=True)
+                else:
+                    st.info(f"No SKUs found with forecasted demand data for the next 1 month.")
+
+            with col2:
+                st.markdown("**3-Month Forecast**")
+                top_3m = get_top_skus_by_forecast(reco_df, top_n=top_n, months=3)
+                if not top_3m.empty:
+                    for col in top_3m.select_dtypes(include='number').columns:
+                        top_3m[col] = top_3m[col].round(0).astype(int)
+                    st.dataframe(top_3m, use_container_width=True, hide_index=True)
+                else:
+                    st.info(f"No SKUs found with forecasted demand data for the next 3 months.")
+
+            with col3:
+                st.markdown("**6-Month Forecast**")
+                top_6m = get_top_skus_by_forecast(reco_df, top_n=top_n, months=6)
+                if not top_6m.empty:
+                    for col in top_6m.select_dtypes(include='number').columns:
+                        top_6m[col] = top_6m[col].round(0).astype(int)
+                    st.dataframe(top_6m, use_container_width=True, hide_index=True)
+                else:
+                    st.info(f"No SKUs found with forecasted demand data for the next 6 months.")
+    
+    # --- 2. Define Functions to Use Real Data ---
+
+    def get_total_forecasted_units(recommendations, horizon_str):
+        """Calculates total forecasted units for a given horizon."""
+        if recommendations is None or recommendations.empty:
+            return 0
+        
+        # Filter for the specific forecast horizon (e.g., '1-Month')
+        horizon_demand = recommendations[recommendations['horizon'] == horizon_str]
+        return horizon_demand['total_forecasted_demand'].sum()
+
+    def get_top_skus_by_forecast(recommendations):
+        """Gets the top 5 SKUs based on the 1-month demand forecast."""
+        if recommendations is None or recommendations.empty:
+            return pd.DataFrame({'SKU': [], 'Forecasted Demand (Next 30D)': []})
+
+        # Get 1-Month forecast, group by SKU, and sum demand
+        one_month_forecast = recommendations[recommendations['horizon'] == '1-Month']
+        top_skus = one_month_forecast.groupby('item_id')['total_forecasted_demand'].sum()
+        top_skus = top_skus.sort_values(ascending=False).head(5).reset_index()
+        top_skus.rename(columns={'item_id': 'SKU', 'total_forecasted_demand': 'Forecasted Demand (Next 30D)'}, inplace=True)
+        return top_skus
+    
+    def get_actual_sales_data(sales):
+        """Gets actual sales data for the last 6 months."""
+        if sales is None or sales.empty:
+            return pd.DataFrame({'Month': [], 'Actual Sales': []})
+        
+        sales['timestamp'] = pd.to_datetime(sales['created_at'])
+        # Ensure we only look at the last 6 full months
+        end_date = datetime.now().replace(day=1) - pd.Timedelta(days=1)
+        start_date = end_date - pd.DateOffset(months=6)
+        
+        # Filter, group by month, and sum sales
+        monthly_sales = sales[(sales['timestamp'] >= start_date) & (sales['timestamp'] <= end_date)]
+        monthly_sales = monthly_sales.set_index('timestamp').groupby(pd.Grouper(freq='ME'))['qty'].sum().reset_index()
+        monthly_sales['Month'] = monthly_sales['timestamp'].dt.strftime('%Y-%m')
+        return monthly_sales[['Month', 'qty']].rename(columns={'qty': 'Actual Sales'})
+
+    # --- Placeholder functions for complex KPIs ---
+    def get_inventory_turnover():
+        # NOTE: Requires COGS and Average Inventory data, which is not available.
+        return 4.2
+
+    def get_sell_through_rate():
+        # NOTE: Requires Units Received data, which is not available.
+        return 65.4
+
+    # --- 3. Build the Dashboard ---
+    st.subheader("Key Performance Indicators (KPIs)", divider='blue')
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(label="Inventory Turnover", value=f"{get_inventory_turnover()}x", help="NOTE: This is a placeholder value.")
+        
+    with col2:
+        st.metric(label="Sell-Through Rate", value=f"{get_sell_through_rate()}%", help="NOTE: This is a placeholder value.")
+
+    with col3:
+        # Using real data for forecasted units
+        forecasted_units_30d = get_total_forecasted_units(reco_df, '1-Month')
+        st.metric(label="Forecasted Units (Next 30D)", value=f"{forecasted_units_30d:,.0f}")
+
+elif page == "Inventory Optimization":
+    st.header("📦 Inventory Optimization & Simulation")
+    st.markdown("Tools for strategic inventory analysis, including ABC classification and ordering simulation.")
+
+    # --- 1. Define Function to Use Real Data ---
+    def load_sales_data_for_abc():
+        """
+        Loads sales data and calculates total revenue per SKU for ABC analysis.
+        """
+        sales_df = load_dataframe_from_mongo("sales_data")
+        if sales_df is None or sales_df.empty:
+            st.warning("Could not load sales data for ABC analysis.")
+            return pd.DataFrame()
+
+        # ABC analysis requires revenue (quantity * price)
+        if 'price' not in sales_df.columns:
+            st.error("Error: 'price' column not found in sales_data. Cannot perform revenue-based ABC analysis.")
+            return pd.DataFrame()
+            
+        sales_df['total_revenue'] = sales_df['qty'] * sales_df['price']
+        
+        # Group by item_id (SKU) and sum the revenue
+        abc_data = sales_df.groupby('sku')['total_revenue'].sum().reset_index()
+        abc_data = abc_data.rename(columns={'sku': 'item_id'})
+        return abc_data
+
+    # --- 2. Build the Dashboard ---
+    st.subheader("ABC Analysis", divider='blue')
+    st.markdown("""
+    Classify your products into A, B, and C categories based on their revenue contribution.
+    - **A-Items**: High-value products (top 80% of revenue).
+    - **B-Items**: Moderate-value products (next 15% of revenue).
+    - **C-Items**: Low-value products (bottom 5% of revenue).
+    """)
+
+    # Use the new function to load real data
+    abc_data = load_sales_data_for_abc()
+
+    if not abc_data.empty:
+        abc_data = abc_data.sort_values(by='total_revenue', ascending=False)
+        abc_data['cumulative_revenue'] = abc_data['total_revenue'].cumsum()
+        total_revenue = abc_data['total_revenue'].sum()
+        abc_data['cumulative_percentage'] = (abc_data['cumulative_revenue'] / total_revenue) * 100
+
+        def assign_abc_category(percentage):
+            if percentage <= 80:
+                return 'A'
+            elif percentage <= 95:
+                return 'B'
+            else:
+                return 'C'
+
+        abc_data['category'] = abc_data['cumulative_percentage'].apply(assign_abc_category)
+        
+        viz_col, data_col = st.columns([1, 2])
+
+        with viz_col:
+            st.markdown("##### SKU Count by Category")
+            category_counts = abc_data['category'].value_counts().reset_index()
+            category_counts.columns = ['Category', 'Count']
+            
+            pie_chart = alt.Chart(category_counts).mark_arc(innerRadius=50).encode(
+                theta=alt.Theta(field="Count", type="quantitative"),
+                color=alt.Color(field="Category", type="nominal", scale=alt.Scale(scheme='viridis')),
+                tooltip=['Category', 'Count']
+            ).properties(height=250)
+            st.altair_chart(pie_chart, use_container_width=True)
+
+        with data_col:
+            st.markdown("##### Top 10 SKUs by Revenue")
+            st.dataframe(
+                abc_data.head(10),
+                column_config={
+                    "item_id": "SKU",
+                    "total_revenue": st.column_config.NumberColumn("Total Revenue", format="$%.2f"),
+                    "cumulative_percentage": st.column_config.ProgressColumn("Revenue Contribution", format="%.2f%%", min_value=0, max_value=100),
+                    "category": "Category"
+                },
+                use_container_width=True,
+                hide_index=True
+            )
+
+    # --- The EOQ simulation remains the same as it is interactive ---
+    st.subheader("EOQ & Reorder Point Simulation", divider='blue')
+    st.markdown("Interactively calculate the Economic Order Quantity (EOQ) and Reorder Point (ROP).")
+
+    sim_col1, sim_col2 = st.columns(2)
+
+    with sim_col1:
+        annual_demand = st.number_input("Annual Demand (Units)", min_value=100, value=10000, step=100)
+        ordering_cost = st.number_input("Cost per Order ($)", min_value=1.0, value=50.0, step=5.0)
+        holding_cost = st.number_input("Annual Holding Cost per Unit ($)", min_value=0.1, value=5.0, step=0.5)
+        lead_time_days = st.slider("Supplier Lead Time (Days)", min_value=1, max_value=90, value=14)
+
+    daily_demand = annual_demand / 365
+    if ordering_cost > 0 and holding_cost > 0:
+        eoq = (2 * annual_demand * ordering_cost / holding_cost)**0.5
+    else:
+        eoq = 0
+        
+    reorder_point = daily_demand * lead_time_days
+    
+    with sim_col2:
+        st.metric("Economic Order Quantity (EOQ)", f"{eoq:,.0f} units", help="The optimal order size to minimize total inventory costs.")
+        st.metric("Reorder Point (ROP)", f"{reorder_point:,.0f} units", help="The inventory level at which a new order should be placed.")
+
+    st.write("This chart simulates the inventory cycle over 90 days based on the EOQ and ROP calculated above.")
+
+    if eoq > 0:
+        inventory_levels = []
+        current_inventory = eoq
+        for day in range(90):
+            inventory_levels.append({'day': day, 'inventory': current_inventory, 'level': 'Inventory Level'})
+            inventory_levels.append({'day': day, 'inventory': reorder_point, 'level': 'Reorder Point'})
+            current_inventory -= daily_demand
+            if current_inventory <= 0:
+                current_inventory = eoq 
+
+        sim_df = pd.DataFrame(inventory_levels)
+
+        inventory_chart = alt.Chart(sim_df).mark_line(interpolate='step-after').encode(
+            x=alt.X('day:Q', title='Day'),
+            y=alt.Y('inventory:Q', title='Inventory Level (Units)'),
+            color=alt.Color('level:N', title='Metric', scale=alt.Scale(
+                domain=['Inventory Level', 'Reorder Point']
+            ))
+        )
+        st.altair_chart(inventory_chart, use_container_width=True)
+    else:
+        st.warning("EOQ is zero. Cannot run simulation.")
