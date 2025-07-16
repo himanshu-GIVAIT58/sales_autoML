@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "Starting development environment with hot reload..."
+echo "Starting development environment with hot reload in detached mode..."
 
-# The command is the same, but this file is designed for bash.
-docker compose up --watch
+# Start Docker Compose with hot reload and detached mode
+docker compose watch
