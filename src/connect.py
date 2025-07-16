@@ -1,13 +1,13 @@
 from pymongo import MongoClient
 from dotenv import load_dotenv
 import os
-
+from src import dbConnect
 
 load_dotenv()
 
 
-MONGO_URI = os.getenv("MONGO_URI")
-client = MongoClient(MONGO_URI)
+MONGO_URI = dbConnect.connection_uri
+client = dbConnect.client
 
 try:
     print("Databases:", client.list_database_names())

@@ -8,19 +8,6 @@ def calculate_seasonal_strength(
     model: str = 'additive',
     fill_method: str = 'interpolate'  
 ) -> float:
-    """
-    Calculates the strength of seasonality in a time series.
-
-    Args:
-        series (pd.Series): Time series with DatetimeIndex.
-        period (int): Seasonality period (e.g., 365 for yearly).
-        model (str): 'additive' or 'multiplicative'.
-        fill_method (str): How to fill missing dates ('interpolate', 'zero', 'ffill').
-
-    Returns:
-        float: Seasonal strength (0 to 1).
-    """
-    
     if series.isnull().all() or len(series.dropna()) < 2 * period:
         return np.nan
 
@@ -38,7 +25,7 @@ def calculate_seasonal_strength(
         elif fill_method == 'zero':
             series_filled = series_reindexed.fillna(0)
         elif fill_method == 'ffill':
-            series_filled = series_reindexed.fillna(method='ffill').fillna(method='bfill')
+            series_filled = series_reindexed.ffill().bfill()
         else:
             raise ValueError(f"Invalid fill_method: {fill_method}")
 
@@ -89,7 +76,7 @@ def identify_seasonal_skus(
     )
 
     sales_data = sales_data.copy()
-    sales_data[time_col] = pd.to_datetime(sales_data[time_col])
+    sales_data[time_col] = pd.to_datetime(sales_data[time_col], format='%Y-%m-%d', errors='coerce')
     sales_data = sales_data.sort_values(by=[id_col, time_col])
 
     results = []

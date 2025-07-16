@@ -1,14 +1,12 @@
 import os
+from matplotlib import rc
 import pandas as pd
 from pymongo import MongoClient
 from dotenv import load_dotenv
 import json
-
+from src import dbConnect
 
 load_dotenv()
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongodb:27017/")  
-MONGO_DB = os.getenv("MONGO_DB", "sales_automl")
-
 
 DATA_FILES = {
     "inventory_recommendations.csv": "inventory_recommendations_20250710_113711",
@@ -69,12 +67,12 @@ def save_file_to_mongo(file_path, collection_name):
     finally:
         client.close()
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongodb:27017/")
-MONGO_DB = os.getenv("MONGO_DB", "sales_automl")
+MONGO_URI = dbConnect.connection_uri
+MONGO_DB = dbConnect.db
 
 def delete_inventory_recommendations_collections():
-    client = MongoClient(MONGO_URI)
-    db = client[MONGO_DB]
+    client = dbConnect.client
+    db = dbConnect.db
     collections = db.list_collection_names()
     deleted = []
     for name in collections:
