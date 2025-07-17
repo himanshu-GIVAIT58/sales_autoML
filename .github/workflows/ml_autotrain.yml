@@ -1,73 +1,41 @@
-name: Deploy to GKE
+name: Build and Train on VM
 
 on:
   push:
     branches:
-      - feat/model_monitor
+      # IMPORTANT: Change this to your main development branch, e.g., 'main'
+      - main
     paths:
       - "src/**"
       - "Dockerfile"
-      - "k8s/**"
-      - ".github/workflows/**"
+      - "docker-compose.yml"
   workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  build-and-train-on-vm:
+    name: Build and Train on GCE VM
     runs-on: ubuntu-latest
-    permissions:
-      contents: 'read'
-      id-token: 'write'
-
-    env:
-      IMAGE_NAME: us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/my-app-repo/sales-automl
-      IMAGE_TAG: v1
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up gcloud CLI
-        uses: google-github-actions/setup-gcloud@v2
+      - name: SSH, Build, and Train
+        uses: appleboy/ssh-action@v1.0.3
         with:
-          credentials: ${{ secrets.GCP_SA_KEY }}
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USERNAME }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            echo "✅ Connected to VM. Updating repository..."
+            cd ~/sales_autoML
+            git checkout main # Or your main branch
+            git pull
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+            echo "🔨 Building new Docker image and restarting services..."
+            # The --build flag forces a rebuild of the 'app' service
+            # The -d flag runs the container in the background
+            sudo docker compose up -d --build
 
-      - name: Login to Google Artifact Registry
-        uses: docker/login-action@v3
-        with:
-          registry: us-central1-docker.pkg.dev
-          username: _json_key
-          password: ${{ secrets.GCP_SA_KEY }}
+            echo "🚀 Triggering model training script..."
+            # Now, exec into the newly started container to run the script
+            sudo docker compose exec app python3 -m src.main
 
-      - name: Set up GKE credentials
-        uses: google-github-actions/get-gke-credentials@v2
-        with:
-          cluster_name: sales-cluster
-          location: us-central1
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
-
-      - name: Build and push Docker image
-        run: |
-          docker build -t $IMAGE_NAME:$IMAGE_TAG .
-          docker push $IMAGE_NAME:$IMAGE_TAG
-
-      - name: Deploy to GKE
-        run: |
-          echo "Restarting the deployment to pull the new image..."
-          kubectl rollout restart deployment/sales-automl-app-deployment
-
-      - name: Verify deployment
-        run: |
-          echo "Waiting for rollout to complete..."
-          kubectl rollout status deployment/sales-automl-app-deployment --timeout=2m
+            echo "✅ Training pipeline finished."
