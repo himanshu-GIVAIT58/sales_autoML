@@ -1,14 +1,20 @@
 name: Build and Train on VM
 
 on:
+  # Trigger on push to the main branch
   push:
     branches:
-      # IMPORTANT: Change this to your main development branch, e.g., 'main'
       - main
     paths:
       - "src/**"
       - "Dockerfile"
       - "docker-compose.yml"
+
+  # Trigger on a weekly schedule
+  schedule:
+    - cron: '0 2 * * 0'
+
+  # Trigger manually
   workflow_dispatch:
 
 jobs:
@@ -26,16 +32,13 @@ jobs:
           script: |
             echo "✅ Connected to VM. Updating repository..."
             cd ~/sales_autoML
-            git checkout main # Or your main branch
+            git checkout main
             git pull
 
             echo "🔨 Building new Docker image and restarting services..."
-            # The --build flag forces a rebuild of the 'app' service
-            # The -d flag runs the container in the background
             sudo docker compose up -d --build
-
-            echo "🚀 Triggering model training script..."
-            # Now, exec into the newly started container to run the script
-            sudo docker compose exec app python3 -m src.main
-
-            echo "✅ Training pipeline finished."
+            
+            echo "🚀 Triggering model training as a background job..."
+            nohup sudo docker compose exec app python3 -m src.main > training.log 2>&1 &
+            
+            echo "✅ Training script started. Check 'training.log' on the VM for progress."
