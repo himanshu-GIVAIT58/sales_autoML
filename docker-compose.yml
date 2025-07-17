@@ -12,15 +12,6 @@ services:
               count: all # Use all available GPUs
               capabilities: [gpu]
     # ------------------------------------
-    # --- ADD THIS SECTION FOR GPU ACCESS ---
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all # Use all available GPUs
-              capabilities: [gpu]
-    # ------------------------------------
     develop:
       watch:
         # Watch Python files for changes and sync + restart
@@ -28,7 +19,7 @@ services:
           target: /app/src
           action: sync+restart
         # Watch requirements and rebuild container
-        - path: ./requirements.txt
+        - path: ./src/requirements.txt
           action: rebuild
         # Watch configuration files
         - path: ./.env
