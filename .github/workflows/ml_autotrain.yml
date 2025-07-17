@@ -9,6 +9,7 @@ on:
       - "src/**"
       - "Dockerfile"
       - "docker-compose.yml"
+      - ".github/workflows/ml_autotrain.yml"
 
   # Trigger on a weekly schedule
   schedule:
