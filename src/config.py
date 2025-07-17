@@ -40,13 +40,13 @@ DATA_COLUMNS = {
     "TARGET": "target",
 }
 
-MAX_SKUS = 100 
+MAX_SKUS = None
 PREDICTION_LENGTH = 183
 RANDOM_SEED = 42
 
 AUTOGLUON_PRESETS = ["fast_training"]
 
-TIME_LIMIT = 600 # 2 hours
+TIME_LIMIT = 10800 # 2 hours
 NUM_VAL_WINDOWS = 3
 EVAL_METRIC = "MASE"
 FREQ = "D"
@@ -57,12 +57,12 @@ TRAINING = {
     "PREDICTION_LENGTH": 183,
     "FREQ": "D",
     "EVAL_METRIC": "MASE",
-    "PRESETS": ["medium_quality", "best_quality"], # Using a list for multi-preset training
-    "TIME_LIMIT": 600,  # 2 hours
+    "PRESETS": ["fast_training","medium_quality","high_quality","best_quality"], # Using a list for multi-preset training
+    "TIME_LIMIT": 14400,  # 2 hours
     "NUM_VAL_WINDOWS": 3,
     "QUANTILE_LEVELS": [0.1, 0.25, 0.5, 0.75, 0.9],
     "RANDOM_SEED": 42,
-    "MAX_SKUS_TO_TRAIN": 100,  # Set to an integer for testing, None for all.
+    "MAX_SKUS_TO_TRAIN": None,  # Set to an integer for testing, None for all.
 }
 
 KNOWN_COVARIATES_NAMES = [
