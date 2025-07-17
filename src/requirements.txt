@@ -17,3 +17,4 @@ shap
 scikit-learn
 statsmodels
 xgboost
+tf-keras

@@ -11,6 +11,52 @@ def create_seasonal_features(df: pd.DataFrame) -> pd.DataFrame:
     df['is_valentine_month'] = (df['month'] == 2).astype(int)
     return df
 
+def add_feedback_features(main_df: pd.DataFrame, feedback_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Engineers features from user feedback and merges them into the main dataframe.
+
+    Args:
+        main_df: The main dataframe with sales and other features.
+        feedback_df: The dataframe loaded from the 'feedback_data' collection.
+
+    Returns:
+        The main dataframe with added feedback features.
+    """
+    if feedback_df.empty:
+        print("   -> No feedback data to process. Skipping feedback feature engineering.")
+        main_df['feedback_score_30d_avg'] = 0
+        return main_df
+
+    print("   -> Engineering features from user feedback...")
+    
+    # Standardize column names
+    feedback_df = feedback_df.rename(columns={'selected_sku': 'item_id'})
+    feedback_df['timestamp'] = pd.to_datetime(feedback_df['timestamp'])
+
+    # 1. Convert categorical feedback into a numerical score
+    feedback_map = {
+        'Forecast too high': -1,
+        'Good forecast': 0,
+        'Forecast too low': 1,
+        'Stockout occurred': 1.5 # Higher weight for stockouts
+    }
+    feedback_df['feedback_score'] = feedback_df['feedback'].map(feedback_map).fillna(0)
+
+    # 2. Create a rolling feature for each item
+    # This captures recent feedback trends for each SKU over a 30-day window
+    feedback_df = feedback_df.sort_values(by=['item_id', 'timestamp'])
+    feedback_df_agg = feedback_df.set_index('timestamp').groupby('item_id')['feedback_score'].rolling('30D').mean().reset_index()
+    feedback_df_agg = feedback_df_agg.rename(columns={'feedback_score': 'feedback_score_30d_avg'})
+    
+    # 3. Merge the feedback feature into the main dataframe
+    main_df = pd.merge(main_df, feedback_df_agg, on=['item_id', 'timestamp'], how='left')
+    
+    # Forward-fill to propagate the last known feedback score, then fill remaining NaNs with 0
+    main_df['feedback_score_30d_avg'] = main_df.groupby('item_id')['feedback_score_30d_avg'].ffill().fillna(0)
+    
+    print("   -> ✅ Feedback features successfully added.")
+    return main_df
+    
 def create_price_elasticity_features(df: pd.DataFrame) -> pd.DataFrame:
     """Adds features related to promotions and high-value discounts."""
     df['is_on_promotion'] = (df['disc'] > 0).astype(int)
