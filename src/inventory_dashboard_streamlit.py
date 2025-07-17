@@ -361,7 +361,26 @@ elif page == "Seasonal Analysis":
             options=[7, 30, 90, 365],
             index=3,
             format_func=lambda x: f"{x} days ({'Weekly' if x==7 else 'Monthly (approx)' if x==30 else 'Quarterly (approx)' if x==90 else 'Annual'})",
-            key='seasonal_period_select'
+            key='seasonal_period_select',
+            help="""
+            **What is Seasonal Period?**
+            This tells the system how often your sales patterns repeat.
+            
+            **Examples:**
+            • **7 days (Weekly)**: For products with weekly patterns
+              - Example: Office supplies that sell more on weekdays
+            • **30 days (Monthly)**: For products with monthly cycles
+              - Example: Groceries that peak at month-end (salary days)
+            • **90 days (Quarterly)**: For products with seasonal business cycles
+              - Example: School supplies that peak every quarter
+            • **365 days (Annual)**: For products with yearly seasons
+              - Example: Winter clothing, festival items, AC units
+            
+            **Which to choose?**
+            - Start with **365 days** for most products
+            - Use **7 days** if you notice weekly patterns
+            - Use **30 days** for monthly salary-driven purchases
+            """
         )
 
     with col2:
@@ -369,7 +388,28 @@ elif page == "Seasonal Analysis":
             "Decomposition Model:",
             options=['additive', 'multiplicative'],
             index=0,
-            help="Multiplicative is better for percentage-based seasonality."
+            help="""
+            **What is Decomposition Model?**
+            This determines how seasonal patterns affect your sales.
+            
+            **Additive Model:**
+            - Seasonal effect is the SAME regardless of sales volume
+            - Example: Ice cream sales increase by +100 units every summer
+            - Use when seasonal boost is consistent in absolute numbers
+            
+            **Multiplicative Model:**
+            - Seasonal effect is a PERCENTAGE of current sales
+            - Example: Festival sales increase by 50% regardless of base sales
+            - Use when seasonal boost grows with your business size
+            
+            **Which to choose?**
+            - **Additive**: If seasonal increase is always the same amount
+            - **Multiplicative**: If seasonal increase is a percentage (more common)
+            
+            **Example:**
+            - Product A sells 100 units normally, 150 in festival → Use Multiplicative (50% increase)
+            - Product B sells 100 units normally, 120 in festival → Use Additive (+20 units)
+            """
         )
 
     with col3:
@@ -377,7 +417,32 @@ elif page == "Seasonal Analysis":
             "Missing Date Fill Method:",
             options=['interpolate', 'zero', 'ffill'],
             index=0,
-            help="How to fill gaps in time series before decomposition."
+            help="""
+            **What is Missing Date Fill Method?**
+            Sometimes your sales data has gaps (missing dates). This tells the system how to handle them.
+            
+            **Methods Explained:**
+            
+            **1. Interpolate (Recommended)**
+            - Estimates missing values based on nearby days
+            - Example: If Mon=10, Wed=30, system estimates Tue=20
+            - Best for: Most business scenarios
+            
+            **2. Zero**
+            - Treats missing dates as zero sales
+            - Example: If Tuesday is missing, assumes 0 sales
+            - Best for: When missing data means no sales (store closures)
+            
+            **3. Forward Fill (ffill)**
+            - Uses the last known value for missing dates
+            - Example: If Mon=10, Tue missing, system uses Tue=10
+            - Best for: When you expect sales to remain constant for missing days
+            
+            **Which to choose?**
+            - **Interpolate**: Generally best, especially for regular sales patterns
+            - **Zero**: If missing data clearly means no sales
+            - **Forward Fill**: If you expect consistent sales and want to avoid underestimating
+            """
         )
 
     sales_events = {
@@ -416,6 +481,7 @@ elif page == "Seasonal Analysis":
     st.markdown("**Set Event Date and Range for Analysis**")
     event_date_inputs = {}
     event_range_inputs = {}
+    analysis_data = pd.DataFrame()  # Initialize empty DataFrame for analysis
 
     # Arrange event inputs in rows, each with 2 events (6 columns: event1-date, event1-before, event1-after, event2-date, event2-before, event2-after)
     events_per_row = 2
@@ -474,52 +540,66 @@ elif page == "Seasonal Analysis":
             st.error(f"Failed to load sales data: {e}")
             analysis_data = pd.DataFrame()
 
-        if analysis_data.empty:
-            st.warning("No data to analyze.")
-        else:
-            with st.spinner("Running decomposition and aggregating results..."):
-                seasonal_sku_info_df = identify_seasonal_skus(
-                    sales_data=analysis_data[['item_id', 'timestamp', 'target']],
-                    min_seasonal_strength=seasonal_strength_threshold,
-                    period_days=seasonal_period_days,
-                    time_col='timestamp',
-                    id_col='item_id',
-                    target_col='target',
-                    model=seasonal_model,
-                    fill_method=fill_method
-                )
+    if analysis_data.empty:
+        st.warning("No data to analyze.")
+    else:
+        with st.spinner("Running decomposition and aggregating results..."):
+            seasonal_sku_info_df = identify_seasonal_skus(
+                sales_data=analysis_data[['item_id', 'timestamp', 'target']],
+                min_seasonal_strength=seasonal_strength_threshold,
+                period_days=seasonal_period_days,
+                time_col='timestamp',
+                id_col='item_id',
+                target_col='target',
+                model=seasonal_model,
+                fill_method=fill_method
+            )
 
+            # Fixed event sales aggregation logic
+            event_sales_data = []
+            for event_name in selected_events:
+                event_date = event_date_inputs[event_name]
+                minus_days, plus_days = event_range_inputs[event_name]
+                start_date = event_date - pd.Timedelta(days=minus_days)
+                end_date = event_date + pd.Timedelta(days=plus_days)
                 
-                event_sales_summary = []
-                for event_name in selected_events:
-                    event_date = event_date_inputs[event_name]
-                    minus_days, plus_days = event_range_inputs[event_name]
-                    start_date = event_date - pd.Timedelta(days=minus_days)
-                    end_date = event_date + pd.Timedelta(days=plus_days)
-                    mask = (analysis_data['timestamp'] >= pd.Timestamp(start_date)) & (analysis_data['timestamp'] <= pd.Timestamp(end_date))
-                    event_data = analysis_data.loc[mask]
+                # Debug print
+                st.write(f"Analyzing {event_name}: {start_date} to {end_date}")
+                
+                mask = (analysis_data['timestamp'] >= pd.Timestamp(start_date)) & (analysis_data['timestamp'] <= pd.Timestamp(end_date))
+                event_data = analysis_data.loc[mask]
+                
+                # Debug print
+                st.write(f"Found {len(event_data)} records for {event_name}")
+                
+                if not event_data.empty:
                     event_agg = (
                         event_data.groupby('item_id')['target']
                         .sum()
                         .reset_index()
                         .rename(columns={'target': f'{event_name}_Sales'})
                     )
-                    if event_sales_summary:
-                        event_sales_summary[0] = event_sales_summary[0].merge(event_agg, on='item_id', how='outer')
-                    else:
-                        event_sales_summary.append(event_agg)
+                    event_sales_data.append(event_agg)
 
+            # Merge all event sales data
+            seasonal_df = seasonal_sku_info_df.copy()
+            
+            if event_sales_data:
+                # Start with the first event data
+                merged_events = event_sales_data[0]
                 
-                seasonal_df = seasonal_sku_info_df.copy()
-                print("Seasonal SKUs identified:", seasonal_df)
-                if event_sales_summary:
-                    seasonal_df = seasonal_df.merge(event_sales_summary[0], on='item_id', how='left')
-
+                # Merge with remaining events
+                for event_df in event_sales_data[1:]:
+                    merged_events = merged_events.merge(event_df, on='item_id', how='outer')
                 
-                seasonal_df = seasonal_df.fillna(0)
-                st.session_state['seasonal_skus'] = seasonal_df
+                # Merge with seasonal data
+                seasonal_df = seasonal_df.merge(merged_events, on='item_id', how='left')
+            
+            # Fill missing values with 0
+            seasonal_df = seasonal_df.fillna(0)
+            st.session_state['seasonal_skus'] = seasonal_df
 
-                st.success(f"✅ Analysis complete. {len(seasonal_df)} SKUs evaluated.")
+            st.success(f"✅ Analysis complete. {len(seasonal_df)} SKUs evaluated.")
 
     if 'seasonal_skus' in st.session_state and not st.session_state['seasonal_skus'].empty:
         df = st.session_state['seasonal_skus']
@@ -605,6 +685,24 @@ elif page == "Executive Summary":
     if model_metrics:
         with st.container():
             st.subheader("📈 Model Accuracy Metrics")
+            
+            # Add model trained date at the top
+            model_trained_date = model_metrics.get('trained_date', 'N/A')
+            print("model trained date",model_trained_date)
+            if model_trained_date != 'N/A':
+                try:
+                    # Parse the date and format it nicely
+                    if isinstance(model_trained_date, str):
+                        trained_dt = pd.to_datetime(model_trained_date)
+                    else:
+                        trained_dt = model_trained_date
+                    formatted_date = trained_dt.strftime("%B %d, %Y at %I:%M %p")
+                    st.info(f"🤖 **Model Last Trained:** {formatted_date}")
+                except:
+                    st.info(f"🤖 **Model Last Trained:** {model_trained_date}")
+            else:
+                st.info("🤖 **Model Last Trained:** Information not available")
+            
             col1, col2, col3 = st.columns(3)
             def safe_float_fmt(val, fmt):
                 try:
@@ -680,6 +778,51 @@ elif page == "Executive Summary":
                     st.dataframe(top_6m, use_container_width=True, hide_index=True)
                 else:
                     st.info(f"No SKUs found with forecasted demand data for the next 6 months.")
+
+            # Add download button for all SKUs forecast data
+            st.markdown("---")
+            st.subheader("📥 Download Complete Forecast Data", divider="blue")
+            
+            if not reco_df.empty:
+                # Prepare download data with timestamp
+                download_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                download_filename = f"all_skus_forecast_{download_timestamp}.csv"
+                
+                # Create a clean version of the data for download
+                download_data = reco_df.copy()
+                
+                # Round numeric columns for cleaner output
+                numeric_columns = download_data.select_dtypes(include='number').columns
+                for col in numeric_columns:
+                    download_data[col] = download_data[col].round(2)
+                
+                # Sort by item_id and horizon for better organization
+                download_data = download_data.sort_values(['item_id', 'horizon'])
+                
+                col1, col2, col3 = st.columns([1, 1, 2])
+                
+                with col1:
+                    st.metric("Total SKUs", f"{len(download_data['item_id'].unique()):,}")
+                
+                with col2:
+                    st.metric("Total Records", f"{len(download_data):,}")
+                
+                with col3:
+                    st.download_button(
+                        label="📥 Download All SKUs Forecast (CSV)",
+                        data=download_data.to_csv(index=False).encode('utf-8'),
+                        file_name=download_filename,
+                        mime='text/csv',
+                        use_container_width=True,
+                        help="Download complete forecast data for all SKUs across all horizons and channels"
+                    )
+                
+                # Show preview of download data
+                with st.expander("📋 Preview Download Data", expanded=False):
+                    st.dataframe(download_data.head(20), use_container_width=True, hide_index=True)
+                    st.caption(f"Showing first 20 rows of {len(download_data)} total records")
+            else:
+                st.info("No forecast data available for download.")
     
     # --- 2. Define Functions to Use Real Data ---
 
@@ -744,133 +887,133 @@ elif page == "Executive Summary":
         forecasted_units_30d = get_total_forecasted_units(reco_df, '1-Month')
         st.metric(label="Forecasted Units (Next 30D)", value=f"{forecasted_units_30d:,.0f}")
 
-elif page == "Inventory Optimization":
-    st.header("📦 Inventory Optimization & Simulation")
-    st.markdown("Tools for strategic inventory analysis, including ABC classification and ordering simulation.")
+# elif page == "Inventory Optimization":
+#     st.header("📦 Inventory Optimization & Simulation")
+#     st.markdown("Tools for strategic inventory analysis, including ABC classification and ordering simulation.")
 
-    # --- 1. Define Function to Use Real Data ---
-    def load_sales_data_for_abc():
-        """
-        Loads sales data and calculates total revenue per SKU for ABC analysis.
-        """
-        sales_df = load_dataframe_from_mongo("sales_data")
-        if sales_df is None or sales_df.empty:
-            st.warning("Could not load sales data for ABC analysis.")
-            return pd.DataFrame()
+#     # --- 1. Define Function to Use Real Data ---
+#     def load_sales_data_for_abc():
+#         """
+#         Loads sales data and calculates total revenue per SKU for ABC analysis.
+#         """
+#         sales_df = load_dataframe_from_mongo("sales_data")
+#         if sales_df is None or sales_df.empty:
+#             st.warning("Could not load sales data for ABC analysis.")
+#             return pd.DataFrame()
 
-        # ABC analysis requires revenue (quantity * price)
-        if 'price' not in sales_df.columns:
-            st.error("Error: 'price' column not found in sales_data. Cannot perform revenue-based ABC analysis.")
-            return pd.DataFrame()
+#         # ABC analysis requires revenue (quantity * price)
+#         if 'price' not in sales_df.columns:
+#             st.error("Error: 'price' column not found in sales_data. Cannot perform revenue-based ABC analysis.")
+#             return pd.DataFrame()
             
-        sales_df['total_revenue'] = sales_df['qty'] * sales_df['price']
+#         sales_df['total_revenue'] = sales_df['qty'] * sales_df['price']
         
-        # Group by item_id (SKU) and sum the revenue
-        abc_data = sales_df.groupby('sku')['total_revenue'].sum().reset_index()
-        abc_data = abc_data.rename(columns={'sku': 'item_id'})
-        return abc_data
+#         # Group by item_id (SKU) and sum the revenue
+#         abc_data = sales_df.groupby('sku')['total_revenue'].sum().reset_index()
+#         abc_data = abc_data.rename(columns={'sku': 'item_id'})
+#         return abc_data
 
-    # --- 2. Build the Dashboard ---
-    st.subheader("ABC Analysis", divider='blue')
-    st.markdown("""
-    Classify your products into A, B, and C categories based on their revenue contribution.
-    - **A-Items**: High-value products (top 80% of revenue).
-    - **B-Items**: Moderate-value products (next 15% of revenue).
-    - **C-Items**: Low-value products (bottom 5% of revenue).
-    """)
+#     # --- 2. Build the Dashboard ---
+#     st.subheader("ABC Analysis", divider='blue')
+#     st.markdown("""
+#     Classify your products into A, B, and C categories based on their revenue contribution.
+#     - **A-Items**: High-value products (top 80% of revenue).
+#     - **B-Items**: Moderate-value products (next 15% of revenue).
+#     - **C-Items**: Low-value products (bottom 5% of revenue).
+#     """)
 
-    # Use the new function to load real data
-    abc_data = load_sales_data_for_abc()
+#     # Use the new function to load real data
+#     abc_data = load_sales_data_for_abc()
 
-    if not abc_data.empty:
-        abc_data = abc_data.sort_values(by='total_revenue', ascending=False)
-        abc_data['cumulative_revenue'] = abc_data['total_revenue'].cumsum()
-        total_revenue = abc_data['total_revenue'].sum()
-        abc_data['cumulative_percentage'] = (abc_data['cumulative_revenue'] / total_revenue) * 100
+#     if not abc_data.empty:
+#         abc_data = abc_data.sort_values(by='total_revenue', ascending=False)
+#         abc_data['cumulative_revenue'] = abc_data['total_revenue'].cumsum()
+#         total_revenue = abc_data['total_revenue'].sum()
+#         abc_data['cumulative_percentage'] = (abc_data['cumulative_revenue'] / total_revenue) * 100
 
-        def assign_abc_category(percentage):
-            if percentage <= 80:
-                return 'A'
-            elif percentage <= 95:
-                return 'B'
-            else:
-                return 'C'
+#         def assign_abc_category(percentage):
+#             if percentage <= 80:
+#                 return 'A'
+#             elif percentage <= 95:
+#                 return 'B'
+#             else:
+#                 return 'C'
 
-        abc_data['category'] = abc_data['cumulative_percentage'].apply(assign_abc_category)
+#         abc_data['category'] = abc_data['cumulative_percentage'].apply(assign_abc_category)
         
-        viz_col, data_col = st.columns([1, 2])
+#         viz_col, data_col = st.columns([1, 2])
 
-        with viz_col:
-            st.markdown("##### SKU Count by Category")
-            category_counts = abc_data['category'].value_counts().reset_index()
-            category_counts.columns = ['Category', 'Count']
+#         with viz_col:
+#             st.markdown("##### SKU Count by Category")
+#             category_counts = abc_data['category'].value_counts().reset_index()
+#             category_counts.columns = ['Category', 'Count']
             
-            pie_chart = alt.Chart(category_counts).mark_arc(innerRadius=50).encode(
-                theta=alt.Theta(field="Count", type="quantitative"),
-                color=alt.Color(field="Category", type="nominal", scale=alt.Scale(scheme='viridis')),
-                tooltip=['Category', 'Count']
-            ).properties(height=250)
-            st.altair_chart(pie_chart, use_container_width=True)
+#             pie_chart = alt.Chart(category_counts).mark_arc(innerRadius=50).encode(
+#                 theta=alt.Theta(field="Count", type="quantitative"),
+#                 color=alt.Color(field="Category", type="nominal", scale=alt.Scale(scheme='viridis')),
+#                 tooltip=['Category', 'Count']
+#             ).properties(height=250)
+#             st.altair_chart(pie_chart, use_container_width=True)
 
-        with data_col:
-            st.markdown("##### Top 10 SKUs by Revenue")
-            st.dataframe(
-                abc_data.head(10),
-                column_config={
-                    "item_id": "SKU",
-                    "total_revenue": st.column_config.NumberColumn("Total Revenue", format="$%.2f"),
-                    "cumulative_percentage": st.column_config.ProgressColumn("Revenue Contribution", format="%.2f%%", min_value=0, max_value=100),
-                    "category": "Category"
-                },
-                use_container_width=True,
-                hide_index=True
-            )
+#         with data_col:
+#             st.markdown("##### Top 10 SKUs by Revenue")
+#             st.dataframe(
+#                 abc_data.head(10),
+#                 column_config={
+#                     "item_id": "SKU",
+#                     "total_revenue": st.column_config.NumberColumn("Total Revenue", format="$%.2f"),
+#                     "cumulative_percentage": st.column_config.ProgressColumn("Revenue Contribution", format="%.2f%%", min_value=0, max_value=100),
+#                     "category": "Category"
+#                 },
+#                 use_container_width=True,
+#                 hide_index=True
+#             )
 
-    # --- The EOQ simulation remains the same as it is interactive ---
-    st.subheader("EOQ & Reorder Point Simulation", divider='blue')
-    st.markdown("Interactively calculate the Economic Order Quantity (EOQ) and Reorder Point (ROP).")
+#     # --- The EOQ simulation remains the same as it is interactive ---
+#     st.subheader("EOQ & Reorder Point Simulation", divider='blue')
+#     st.markdown("Interactively calculate the Economic Order Quantity (EOQ) and Reorder Point (ROP).")
 
-    sim_col1, sim_col2 = st.columns(2)
+#     sim_col1, sim_col2 = st.columns(2)
 
-    with sim_col1:
-        annual_demand = st.number_input("Annual Demand (Units)", min_value=100, value=10000, step=100)
-        ordering_cost = st.number_input("Cost per Order ($)", min_value=1.0, value=50.0, step=5.0)
-        holding_cost = st.number_input("Annual Holding Cost per Unit ($)", min_value=0.1, value=5.0, step=0.5)
-        lead_time_days = st.slider("Supplier Lead Time (Days)", min_value=1, max_value=90, value=14)
+#     with sim_col1:
+#         annual_demand = st.number_input("Annual Demand (Units)", min_value=100, value=10000, step=100)
+#         ordering_cost = st.number_input("Cost per Order ($)", min_value=1.0, value=50.0, step=5.0)
+#         holding_cost = st.number_input("Annual Holding Cost per Unit ($)", min_value=0.1, value=5.0, step=0.5)
+#         lead_time_days = st.slider("Supplier Lead Time (Days)", min_value=1, max_value=90, value=14)
 
-    daily_demand = annual_demand / 365
-    if ordering_cost > 0 and holding_cost > 0:
-        eoq = (2 * annual_demand * ordering_cost / holding_cost)**0.5
-    else:
-        eoq = 0
+#     daily_demand = annual_demand / 365
+#     if ordering_cost > 0 and holding_cost > 0:
+#         eoq = (2 * annual_demand * ordering_cost / holding_cost)**0.5
+#     else:
+#         eoq = 0
         
-    reorder_point = daily_demand * lead_time_days
+#     reorder_point = daily_demand * lead_time_days
     
-    with sim_col2:
-        st.metric("Economic Order Quantity (EOQ)", f"{eoq:,.0f} units", help="The optimal order size to minimize total inventory costs.")
-        st.metric("Reorder Point (ROP)", f"{reorder_point:,.0f} units", help="The inventory level at which a new order should be placed.")
+#     with sim_col2:
+#         st.metric("Economic Order Quantity (EOQ)", f"{eoq:,.0f} units", help="The optimal order size to minimize total inventory costs.")
+#         st.metric("Reorder Point (ROP)", f"{reorder_point:,.0f} units", help="The inventory level at which a new order should be placed.")
 
-    st.write("This chart simulates the inventory cycle over 90 days based on the EOQ and ROP calculated above.")
+#     st.write("This chart simulates the inventory cycle over 90 days based on the EOQ and ROP calculated above.")
 
-    if eoq > 0:
-        inventory_levels = []
-        current_inventory = eoq
-        for day in range(90):
-            inventory_levels.append({'day': day, 'inventory': current_inventory, 'level': 'Inventory Level'})
-            inventory_levels.append({'day': day, 'inventory': reorder_point, 'level': 'Reorder Point'})
-            current_inventory -= daily_demand
-            if current_inventory <= 0:
-                current_inventory = eoq 
+#     if eoq > 0:
+#         inventory_levels = []
+#         current_inventory = eoq
+#         for day in range(90):
+#             inventory_levels.append({'day': day, 'inventory': current_inventory, 'level': 'Inventory Level'})
+#             inventory_levels.append({'day': day, 'inventory': reorder_point, 'level': 'Reorder Point'})
+#             current_inventory -= daily_demand
+#             if current_inventory <= 0:
+#                 current_inventory = eoq 
 
-        sim_df = pd.DataFrame(inventory_levels)
+#         sim_df = pd.DataFrame(inventory_levels)
 
-        inventory_chart = alt.Chart(sim_df).mark_line(interpolate='step-after').encode(
-            x=alt.X('day:Q', title='Day'),
-            y=alt.Y('inventory:Q', title='Inventory Level (Units)'),
-            color=alt.Color('level:N', title='Metric', scale=alt.Scale(
-                domain=['Inventory Level', 'Reorder Point']
-            ))
-        )
-        st.altair_chart(inventory_chart, use_container_width=True)
-    else:
-        st.warning("EOQ is zero. Cannot run simulation.")
+#         inventory_chart = alt.Chart(sim_df).mark_line(interpolate='step-after').encode(
+#             x=alt.X('day:Q', title='Day'),
+#             y=alt.Y('inventory:Q', title='Inventory Level (Units)'),
+#             color=alt.Color('level:N', title='Metric', scale=alt.Scale(
+#                 domain=['Inventory Level', 'Reorder Point']
+#             ))
+#         )
+#         st.altair_chart(inventory_chart, use_container_width=True)
+#     else:
+#         st.warning("EOQ is zero. Cannot run simulation.")

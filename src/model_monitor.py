@@ -1,132 +1,251 @@
 import datetime
 import pandas as pd
 from pymongo import MongoClient
-from dotenv import load_dotenv
 import os
 import numpy as np
 from autogluon.timeseries.predictor import TimeSeriesPredictor
 from pymongo.database import Database
-from scipy.stats import ks_2samp
+from scipy.stats import ks_2samp, chi2_contingency
+from dataclasses import dataclass, asdict
+from typing import Any, Dict, List
+
+# Assuming dbConnect.py handles the MongoDB connection
 from src import dbConnect
+
+# --- Dataclass for Structured Output ---
+@dataclass
+class ModelValidationResult:
+    """A structured result of the model validation pipeline."""
+    decision: str  # "promote" or "reject"
+    reasons: List[str]
+    data_drift_report: Dict[str, Any]
+    performance_comparison: Dict[str, Any]
+    new_model_metrics: Dict[str, Any]
+    champion_model_id: Any
+
+
+# --- Enhanced Monitoring Functions ---
 
 def log_model_run(
     predictor: TimeSeriesPredictor,
     collection_name: str,
     performance_metrics: dict,
-    data_snapshot_info: dict | None = None,
+    validation_result: ModelValidationResult,
+    data_snapshot_info: dict,
     trigger_source: str = "auto",
 ):
-    load_dotenv()
-    client = dbConnect.client
+    """Logs a comprehensive record of the model training and validation run."""
     db = dbConnect.db
-
+    
     try:
+        # Capture more detailed model information from AutoGluon
+        model_details = {
+            "best_model": predictor.model_best,
+            "model_names": predictor.model_names(),
+            "leaderboard": predictor.leaderboard().to_dict("records"),
+        }
         feature_importances = predictor.feature_importance().to_dict()
-    except Exception:
+    except Exception as e:
+        print(f"Warning: Could not capture full model details. Error: {e}")
+        model_details = {}
         feature_importances = {}
 
     run_doc = {
-        "collection_name": collection_name,
-        "trained_date": datetime.datetime.now().isoformat(),
+        "run_id": f"{collection_name}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}",
+        "trained_date": datetime.datetime.now(datetime.timezone.utc),
+        "model_promotion_decision": validation_result.decision,
+        "validation_reasons": validation_result.reasons,
         "performance_metrics": performance_metrics,
+        "champion_model_id": validation_result.champion_model_id,
+        "data_snapshot_info": data_snapshot_info,
         "trigger_source": trigger_source,
-        "data_snapshot_info": data_snapshot_info or {},
+        "model_details": model_details,
         "feature_importances": feature_importances,
+        "data_drift_report": validation_result.data_drift_report,
     }
 
     db.model_runs.insert_one(run_doc)
-    print(f"Logged model run metadata in 'model_runs' collection.")
+    print(f"✅ Logged model run and validation results to 'model_runs' collection.")
 
 
 def check_for_drift(
-    previous_data: pd.DataFrame,
-    new_data: pd.DataFrame,
-    mean_threshold: float = 0.1,
-    p_value_threshold: float = 0.05
-) -> bool:
-    if previous_data.empty or new_data.empty:
-        return False
+    reference_data: pd.DataFrame,
+    current_data: pd.DataFrame,
+    p_value_threshold: float = 0.05,
+    max_categories: int = 20,
+) -> Dict[str, Any]:
+    """
+    Performs comprehensive drift detection for both numeric and categorical features.
+    - Numeric drift: Kolmogorov-Smirnov (KS) test.
+    - Categorical drift: Chi-squared test.
+    """
+    drift_report = {"drift_detected": False, "details": {}}
+    if reference_data.empty or current_data.empty:
+        drift_report["reasons"] = ["Reference or current data is empty."]
+        return drift_report
 
-    common_cols = previous_data.columns.intersection(new_data.columns)
-    if len(common_cols) == 0:
-        return False
-
-    mean_diffs = []
-    p_values = []
+    common_cols = reference_data.columns.intersection(current_data.columns)
+    drifted_features = []
 
     for col in common_cols:
-        if pd.api.types.is_numeric_dtype(previous_data[col]):
-            old_mean = previous_data[col].mean()
-            new_mean = new_data[col].mean()
-            if old_mean != 0:
-                diff_ratio = abs((new_mean - old_mean) / old_mean)
-                mean_diffs.append(diff_ratio)
-            stat, p_value = ks_2samp(
-                previous_data[col].dropna(),
-                new_data[col].dropna()
+        # 1. Numeric Feature Drift (KS Test)
+        if pd.api.types.is_numeric_dtype(reference_data[col]):
+            stat, p_value = ks_2samp(reference_data[col].dropna(), current_data[col].dropna())
+            if p_value < p_value_threshold:
+                drifted_features.append(col)
+                drift_report["details"][col] = {"type": "numeric", "p_value": p_value, "drifted": True}
+        
+        # 2. Categorical Feature Drift (Chi-Squared Test)
+        elif pd.api.types.is_object_dtype(reference_data[col]) or pd.api.types.is_categorical_dtype(reference_data[col]):
+            # Skip high-cardinality features for chi2 test to be meaningful
+            if reference_data[col].nunique() > max_categories:
+                continue
+            
+            contingency_table = pd.crosstab(
+                reference_data[col].astype(str), 
+                current_data[col].astype(str)
             )
-            p_values.append(p_value)
-
-    if not mean_diffs or not p_values:
-        return False
-
-    avg_diff = np.mean(mean_diffs)
-    min_p_value = np.min(p_values)
-
-    drift_detected = (avg_diff > mean_threshold) or (min_p_value < p_value_threshold)
-    return bool(drift_detected)
+            try:
+                chi2, p_value, _, _ = chi2_contingency(contingency_table)
+                if p_value < p_value_threshold:
+                    drifted_features.append(col)
+                    drift_report["details"][col] = {"type": "categorical", "p_value": p_value, "drifted": True}
+            except ValueError: # Happens if a category exists in one but not the other
+                drift_report["details"][col] = {"type": "categorical", "error": "Category mismatch"}
 
 
-def rollback_to_previous_version(
-    limit_version_count: int = 1
-) -> str:
-    load_dotenv()
-    client = dbConnect.client
-    db = dbConnect.db
-
-    versioned = [coll for coll in db.list_collection_names() if coll.startswith("inventory_recommendations_")]
-    versioned.sort()
-
-    if len(versioned) < 1:
-        print("No rollback possible because only one or zero versioned collections exist.")
-        return ""
-
-    newest = versioned[-1]
-    second_newest = versioned[-2] if len(versioned) >= 2 else ""
-
-    if len(versioned) > limit_version_count:
-        db.drop_collection(newest)
-        print(f"Rolled back and dropped the newest collection: {newest}")
-        return second_newest
-    else:
-        print("Rollback not performed because limit_version_count is reached.")
-        return ""
+    if drifted_features:
+        drift_report["drift_detected"] = True
+        drift_report["reasons"] = [f"Significant drift detected in features: {', '.join(drifted_features)}"]
+    
+    return drift_report
 
 
 def compare_model_performance(
+    new_metrics: Dict[str, float],
+    champion_metrics: Dict[str, float],
     threshold_improvement: float = 0.02
-) -> bool:
-    load_dotenv()
-    client = dbConnect.client
-    db = dbConnect.db
+) -> Dict[str, Any]:
+    """Compares new model performance against the champion model."""
+    comparison = {"is_better": False, "reasons": []}
+    
+    if not champion_metrics:
+        comparison["is_better"] = True
+        comparison["reasons"].append("No champion model to compare against. New model promoted by default.")
+        return comparison
 
-    runs = list(db.model_runs.find().sort("trained_date", 1))
-    if len(runs) < 2:
-        print("No historical runs to compare.")
-        return True
-
-    previous_run = runs[-2]
-    latest_run = runs[-1]
-
-    prev_mase = previous_run["performance_metrics"].get("MASE")
-    new_mase = latest_run["performance_metrics"].get("MASE")
+    prev_mase = champion_metrics.get("MASE")
+    new_mase = new_metrics.get("MASE")
 
     if prev_mase is None or new_mase is None:
-        print("Cannot compare MASE; missing metrics. Defaulting to acceptance.")
-        return True
+        comparison["is_better"] = True # Default to accept if metric is missing
+        comparison["reasons"].append("MASE metric missing, cannot compare. Promoting by default.")
+        return comparison
 
-    improvement = (prev_mase - new_mase) / prev_mase
-    print(f"Model improvement over previous: {improvement:.2%}")
+    # For MASE, lower is better.
+    if new_mase < prev_mase:
+        improvement = abs((new_mase - prev_mase) / prev_mase) if prev_mase != 0 else float('inf')
+        comparison["reasons"].append(f"New model improved MASE by {improvement:.2%}.")
+        if improvement >= threshold_improvement:
+            comparison["is_better"] = True
+            comparison["reasons"].append(f"Improvement meets or exceeds the {threshold_improvement:.0%} threshold.")
+        else:
+            comparison["reasons"].append(f"Improvement is below the {threshold_improvement:.0%} threshold.")
+    else:
+        comparison["reasons"].append("New model MASE is worse than or equal to the champion model.")
 
-    better = improvement >= threshold_improvement
-    return better
+    comparison["champion_mase"] = prev_mase
+    comparison["new_mase"] = new_mase
+    
+    return comparison
+
+
+def manage_recommendation_versions(
+    decision: str, 
+    new_collection_name: str, 
+    versions_to_keep: int = 5
+):
+    """Archives old versions or rolls back a rejected model's output."""
+    db = dbConnect.db
+    
+    if decision == "promote":
+        # On promotion, clean up old versions beyond the keep limit
+        versioned_collections = sorted([
+            coll for coll in db.list_collection_names() 
+            if coll.startswith("inventory_recommendations_")
+        ])
+        
+        if len(versioned_collections) > versions_to_keep:
+            collections_to_drop = versioned_collections[:-versions_to_keep]
+            for coll in collections_to_drop:
+                db.drop_collection(coll)
+                print(f"🧹 Archived old recommendations: {coll}")
+                
+    elif decision == "reject":
+        # On rejection, drop the newly created (but rejected) recommendations
+        db.drop_collection(new_collection_name)
+        print(f"🗑️ Rolled back and dropped rejected recommendations: {new_collection_name}")
+
+
+# --- Main Orchestration Pipeline ---
+
+def run_model_validation_pipeline(
+    new_predictor: TimeSeriesPredictor,
+    new_training_data: pd.DataFrame,
+    new_performance_metrics: Dict[str, float],
+) -> ModelValidationResult:
+    """Orchestrates the model validation process."""
+    print("🚀 Starting Model Validation Pipeline...")
+    db = dbConnect.db
+    reasons = []
+
+    # 1. Get the current champion model and its data snapshot
+    champion_run = db.model_runs.find_one(
+        {"model_promotion_decision": "promote"},
+        sort=[("trained_date", -1)]
+    )
+    
+    if not champion_run:
+        print("No champion model found. Promoting new model by default.")
+        decision = "promote"
+        reasons.append("No champion model exists for comparison.")
+        drift_report = {}
+        perf_comparison = {}
+        champion_id = "None"
+    else:
+        champion_id = champion_run.get("_id")
+        print(f"Found champion model from run ID: {champion_id}")
+        
+        # 2. Check for Data Drift
+        champion_snapshot_info = champion_run.get("data_snapshot_info", {})
+        champion_data_collection = champion_snapshot_info.get("collection_name")
+        
+        if champion_data_collection:
+            champion_data = pd.DataFrame(list(db[champion_data_collection].find()))
+            drift_report = check_for_drift(champion_data, new_training_data)
+            reasons.extend(drift_report.get("reasons", []))
+            print(f"Data Drift Check: {'Drift Detected' if drift_report['drift_detected'] else 'No Significant Drift'}")
+        else:
+            drift_report = {"drift_detected": False, "reasons": ["Champion data snapshot not found."]}
+
+        # 3. Compare Model Performance
+        champion_metrics = champion_run.get("performance_metrics", {})
+        perf_comparison = compare_model_performance(new_performance_metrics, champion_metrics)
+        reasons.extend(perf_comparison.get("reasons", []))
+        print(f"Performance Check: {'New model is better' if perf_comparison['is_better'] else 'New model is not better'}")
+
+        # 4. Make Promotion Decision
+        is_promotable = perf_comparison["is_better"] and not drift_report["drift_detected"]
+        decision = "promote" if is_promotable else "reject"
+
+    result = ModelValidationResult(
+        decision=decision,
+        reasons=reasons,
+        data_drift_report=drift_report,
+        performance_comparison=perf_comparison,
+        new_model_metrics=new_performance_metrics,
+        champion_model_id=str(champion_id) if champion_id else "None"
+    )
+
+    print(f"🏁 Validation Pipeline Decision: **{result.decision.upper()}**")
+    return result

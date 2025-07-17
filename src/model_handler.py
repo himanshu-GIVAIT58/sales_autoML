@@ -1,6 +1,6 @@
 import pandas as pd
 import os
-from typing import Optional
+from typing import Optional, Dict, List
 import joblib  
 from autogluon.timeseries import TimeSeriesPredictor, TimeSeriesDataFrame
 from src import config
@@ -25,13 +25,121 @@ def train_predictor(ts_data, config):
             presets=config.AUTOGLUON_PRESETS,
             time_limit=config.TIME_LIMIT,
             num_val_windows=config.NUM_VAL_WINDOWS,
-            # random_seed=config.RANDOM_SEED
+            random_seed=config.RANDOM_SEED
         )
         print("Model training completed.")
         return predictor
     except Exception as e:
         print(f"❌ Error during model training: {e}")
         raise
+
+def train_multiple_predictors(ts_data: TimeSeriesDataFrame, config) -> Dict[str, TimeSeriesPredictor]:
+    """
+    Trains multiple TimeSeriesPredictor models, one for each preset specified in the config.
+    Returns a dictionary of trained predictors.
+    """
+    predictors = {}
+    presets = config.TRAINING['PRESETS']  # Expects a list, e.g., ["medium_quality", "best_quality"]
+
+    print(f"\nTraining models for presets: {presets}")
+    for preset in presets:
+        print("-" * 40)
+        print(f"🚀 Starting training for preset: '{preset}'")
+        
+        # Create a unique path for each predictor to avoid overwriting
+        model_path = os.path.join(config.MODEL_SAVE_PATH, preset)
+        os.makedirs(model_path, exist_ok=True)
+
+        try:
+            predictor = TimeSeriesPredictor(
+                prediction_length=config.TRAINING['PREDICTION_LENGTH'],
+                path=model_path,
+                target=config.DATA_COLUMNS['TARGET'],
+                known_covariates_names=config.KNOWN_COVARIATES_NAMES,
+                freq=config.TRAINING['FREQ'],
+                eval_metric=config.TRAINING['EVAL_METRIC'],
+                quantile_levels=config.TRAINING['QUANTILE_LEVELS']
+            )
+            predictor.fit(
+                ts_data,
+                presets=preset,
+                time_limit=config.TRAINING['TIME_LIMIT'],
+                num_val_windows=config.TRAINING['NUM_VAL_WINDOWS'],
+                random_seed=config.TRAINING['RANDOM_SEED']
+            )
+            predictors[preset] = predictor
+            print(f"✅ Model training completed for preset: '{preset}'")
+        except Exception as e:
+            print(f"❌ Error during model training for preset '{preset}': {e}")
+            # Continue to the next preset even if one fails
+            continue
+            
+    if not predictors:
+        raise RuntimeError("All model training presets failed. No predictors were trained.")
+        
+    return predictors
+
+def make_ensembled_predictions(
+    predictors: Dict[str, TimeSeriesPredictor], 
+    ts_data: TimeSeriesDataFrame, 
+    holidays_df: pd.DataFrame
+) -> pd.DataFrame:
+    """
+    Generates predictions from multiple models and creates a single ensembled forecast.
+    """
+    all_predictions = []
+    
+    # Generate future known covariates once, as they are the same for all models
+    # We use the first available predictor to create the future frame
+    first_predictor = next(iter(predictors.values()))
+    future_known_covariates = generate_future_covariates(first_predictor, ts_data, holidays_df)
+
+    print("\nGenerating forecasts from each trained model preset...")
+    for preset_name, predictor in predictors.items():
+        print(f"  -> Predicting with '{preset_name}' model...")
+        try:
+            predictions = predictor.predict(ts_data, known_covariates=future_known_covariates)
+            predictions["model_preset"] = preset_name
+            all_predictions.append(predictions.reset_index())
+        except Exception as e:
+            print(f"  -> ⚠️ Could not generate predictions for preset '{preset_name}': {e}")
+            continue
+
+    if not all_predictions:
+        raise RuntimeError("Failed to generate predictions from any model.")
+
+    # Concatenate all predictions into a single DataFrame
+    combined_predictions_df = pd.concat(all_predictions, ignore_index=True)
+
+    # Ensemble by averaging across models for each item and timestamp
+    print("\nEnsembling predictions by averaging...")
+    # Columns to average: 'mean' and all quantile columns
+    quantile_cols = [str(q) for q in first_predictor.quantile_levels]
+    cols_to_average = ["mean"] + quantile_cols
+    
+    ensembled_df = combined_predictions_df.groupby(["item_id", "timestamp"])[cols_to_average].mean().reset_index()
+    
+    print("✅ Ensembled forecast generated successfully.")
+    return ensembled_df
+
+def evaluate_predictors(predictors: Dict[str, TimeSeriesPredictor], ts_data: TimeSeriesDataFrame) -> pd.DataFrame:
+    """Evaluates all trained predictors and returns a combined leaderboard."""
+    all_leaderboards = []
+    print("\n--- Model Leaderboards ---")
+    for preset_name, predictor in predictors.items():
+        try:
+            print(f"\n--- Leaderboard for preset: '{preset_name}' ---")
+            leaderboard = predictor.leaderboard(ts_data)
+            leaderboard['preset'] = preset_name
+            print(leaderboard)
+            all_leaderboards.append(leaderboard)
+        except Exception as e:
+             print(f"  -> ⚠️ Could not generate leaderboard for preset '{preset_name}': {e}")
+    
+    if not all_leaderboards:
+        return pd.DataFrame()
+        
+    return pd.concat(all_leaderboards, ignore_index=True)
 
 def evaluate_predictor(predictor, ts_data):
     try:
@@ -185,14 +293,22 @@ def prepare_prediction_data(user_data_raw, holidays_df):
 
 def generate_future_covariates(predictor, ts_data, holidays_df):
     """Generates the known covariates for the future prediction window."""
-    future_covariates = predictor.make_future_data_frame(ts_data)
+    future_covariates = predictor.make_future_data_frame(data=ts_data)
+    future_covariates.reset_index(inplace=True)
     future_covariates = create_seasonal_features(future_covariates)
-    future_covariates = pd.merge(future_covariates, holidays_df[['timestamp', 'is_holiday']], on='timestamp', how='left').fillna(0)
+    
+    if holidays_df is not None:
+        future_covariates = pd.merge(
+            future_covariates, holidays_df[['timestamp', 'is_holiday']], 
+            on="timestamp", how="left"
+        ).fillna(0)
+        
+    # Ensure all required columns exist
     for col in config.KNOWN_COVARIATES_NAMES:
         if col not in future_covariates.columns:
             future_covariates[col] = 0
+            
     return future_covariates
-
 
 def make_fast_predictions(predictor, user_uploaded_data):
     if predictor is None:
