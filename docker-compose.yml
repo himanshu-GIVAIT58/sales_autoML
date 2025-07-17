@@ -12,6 +12,15 @@ services:
               count: all # Use all available GPUs
               capabilities: [gpu]
     # ------------------------------------
+    # --- ADD THIS SECTION FOR GPU ACCESS ---
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all # Use all available GPUs
+              capabilities: [gpu]
+    # ------------------------------------
     develop:
       watch:
         # Watch Python files for changes and sync + restart
