@@ -560,13 +560,19 @@ elif page == "Seasonal Analysis":
             for event_name in selected_events:
                 event_date = event_date_inputs[event_name]
                 minus_days, plus_days = event_range_inputs[event_name]
-                start_date = event_date - pd.Timedelta(days=minus_days)
-                end_date = event_date + pd.Timedelta(days=plus_days)
+                
+                # Convert event_date to pandas Timestamp if it's not already
+                if isinstance(event_date, str):
+                    event_date = pd.to_datetime(event_date)
+                
+                start_date = pd.Timestamp(event_date) - pd.Timedelta(days=minus_days)
+                end_date = pd.Timestamp(event_date) + pd.Timedelta(days=plus_days)
                 
                 # Debug print
                 st.write(f"Analyzing {event_name}: {start_date} to {end_date}")
-                
-                mask = (analysis_data['timestamp'] >= pd.Timestamp(start_date)) & (analysis_data['timestamp'] <= pd.Timestamp(end_date))
+
+                analysis_data['timestamp'] = pd.to_datetime(analysis_data['timestamp'])
+                mask = (analysis_data['timestamp'] >= start_date) & (analysis_data['timestamp'] <= end_date)
                 event_data = analysis_data.loc[mask]
                 
                 # Debug print
