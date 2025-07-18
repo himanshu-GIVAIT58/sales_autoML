@@ -12,18 +12,18 @@ services:
               count: all # Use all available GPUs
               capabilities: [gpu]
     # ------------------------------------
-    develop:
-      watch:
-        # Watch Python files for changes and sync + restart
-        - path: ./src
-          target: /app/src
-          action: sync+restart
-        # Watch requirements and rebuild container
-        - path: ./src/requirements.txt
-          action: rebuild
-        # Watch configuration files
-        - path: ./.env
-          action: rebuild
+    # develop:
+    #   watch:
+    #     # Watch Python files for changes and sync + restart
+    #     - path: ./src
+    #       target: /app/src
+    #       action: sync+restart
+    #     # Watch requirements and rebuild container
+    #     - path: ./src/requirements.txt
+    #       action: rebuild
+    #     # Watch configuration files
+    #     - path: ./.env
+    #       action: rebuild
     container_name: sales_automl_app
     ports:
       - "8501:8501" # Map Streamlit's default port to localhost
