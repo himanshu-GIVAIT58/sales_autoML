@@ -29,3 +29,20 @@ data/
 AutogluonModels/
 graphs/
 AutogluonModels/
+service_account.json
+# Configuration files
+*.cfg
+*.ini
+*.json
+# Python bytecode files
+*.pyc
+*.pyo
+# Cython files
+*.so
+# Distribution / packaging
+*.egg
+*.egg-info/
+# PyInstaller
+# PyInstaller files
+*.spec
+
