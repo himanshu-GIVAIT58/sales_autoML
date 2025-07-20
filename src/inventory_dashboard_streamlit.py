@@ -721,217 +721,135 @@ elif page == "Seasonal Analysis":
         st.info("Run analysis to see seasonal insights.")
 
 elif page == "Executive Summary":
+    def get_top_skus_by_forecast(recommendations_df, top_n, months):
+        if recommendations_df is None or recommendations_df.empty:
+            return pd.DataFrame({'SKU': [], 'Forecasted Demand': []})
+
+        horizon_str = f'{months}-Month'
+        horizon_forecast = recommendations_df[recommendations_df['horizon'] == horizon_str]
+        
+        if horizon_forecast.empty:
+            return pd.DataFrame({'SKU': [], 'Forecasted Demand': []})
+
+        top_skus = horizon_forecast.groupby('item_id')['total_forecasted_demand'].sum()
+        top_skus = top_skus.sort_values(ascending=False).head(top_n).reset_index()
+        top_skus.rename(columns={'item_id': 'SKU', 'total_forecasted_demand': 'Forecasted Demand'}, inplace=True)
+        return top_skus
+
+    def safe_float_fmt(val, fmt):
+        try:
+            return format(abs(float(val)), fmt)
+        except (ValueError, TypeError):
+            return str(val)
     st.header("📈 Executive Summary Dashboard")
     st.markdown("A high-level overview of critical business metrics.")
     
     reco_df = load_latest_recommendation_data()
     model_metrics = get_latest_model_metrics()
-    sales_df = load_dataframe_from_mongo("sales_data")
+    model_runs = load_dataframe_from_mongo("model_runs")
     
+    # --- Model Performance Metrics ---
     if model_metrics:
-        with st.container():
-            st.subheader("📈 Model Accuracy Metrics")
+        with st.container(border=True):
+            st.subheader("📈 Model Performance")   
+            # Display the last model training date
+            model_trained_date = model_runs.get('trained_date')
+            latest_date = pd.to_datetime(model_runs['trained_date']).max()
+            formatted_date = latest_date.strftime("%B %d, %Y at %I:%M %p")
+            st.info(f"🤖 **Model Last Trained:** {formatted_date}")
             
-            # Add model trained date at the top
-            model_trained_date = model_metrics.get('trained_date', 'N/A')
-            print("model trained date",model_trained_date)
-            if model_trained_date != 'N/A':
-                try:
-                    # Parse the date and format it nicely
-                    if isinstance(model_trained_date, str):
-                        trained_dt = pd.to_datetime(model_trained_date)
-                    else:
-                        trained_dt = model_trained_date
-                    formatted_date = trained_dt.strftime("%B %d, %Y at %I:%M %p")
-                    st.info(f"🤖 **Model Last Trained:** {formatted_date}")
-                except:
-                    st.info(f"🤖 **Model Last Trained:** {model_trained_date}")
-            else:
-                st.info("🤖 **Model Last Trained:** Information not available")
-            
+            # Display MASE, RMSE, and MAPE metrics
             col1, col2, col3 = st.columns(3)
-            def safe_float_fmt(val, fmt):
-                try:
-                    return format(abs(float(val)), fmt)
-                except Exception:
-                    return str(val)
+            col1.metric("MASE", safe_float_fmt(model_metrics.get('MASE'), ".3f"),
+                        help="Mean Absolute Scaled Error. Below 1 is good, as it means the model is better than a naive forecast.")
+            col2.metric("RMSE", f"{safe_float_fmt(model_metrics.get('RMSE'), '.2f')}",
+                        help="Root Mean Squared Error. The typical difference between predicted and actual sales, in units.")
+            col3.metric("MAPE", safe_float_fmt(model_metrics.get('MAPE'), ".2%"),
+                        help="Mean Absolute Percentage Error. The average forecast error as a percentage of actual sales.")
 
-            col1.metric("MASE", safe_float_fmt(model_metrics.get('MASE', 'N/A'), ".3f"),help=(
-        "MASE (Mean Absolute Scaled Error) compares the model's forecast error to a simple baseline (like last month's sales). "
-        "A value below 1 means the model is better than guessing last period's sales. "
-        "Example: MASE = 0.7 means the model is 30% better than the naive forecast."
-    ))
-            col2.metric("RMSE", safe_float_fmt(model_metrics.get('RMSE', 'N/A'), ".2f"),help=(
-        "RMSE (Root Mean Squared Error) shows the typical difference between predicted and actual sales, in units. "
-        "Lower is better. "
-        "Example: RMSE = 12 means, on average, the forecast is off by 12 units."
-    ))
-            col3.metric("MAPE", safe_float_fmt(model_metrics.get('MAPE', 'N/A'), ".2%"),help=(
-        "MAPE (Mean Absolute Percentage Error) shows the average error as a percentage of actual sales. "
-        "Lower is better. "
-        "Example: MAPE = 8% means forecasts are off by 8% on average."
-    ))
-            st.markdown("---")
+    st.markdown("---")
 
-            col1, col2, col3 = st.columns(3)
+    # --- Sales vs. Forecast Overview ---
+    st.subheader("🗓️ Sales vs. Forecasted Demand")
+    
+    # Row 1: Actual Sales
+    with st.container(border=True):
+        st.markdown("**Past Actual Sales (All SKUs)**")
+        col1, col2, col3 = st.columns(3)
+        if not reco_df.empty:
+
             sku_list = sorted(reco_df['item_id'].unique())
             all_sku_last_6 = get_last_n_months_sales(sku_list=sku_list, quantity_col='qty', months_back=6)
             all_sku_last_3 = get_last_n_months_sales(sku_list=sku_list, quantity_col='qty', months_back=3)
             all_sku_last_1 = get_last_n_months_sales(sku_list=sku_list, quantity_col='qty', months_back=1)
-            col1.metric("All SKUs Last 6-Month Actual Sales", f"{all_sku_last_6['qty'].sum():,.0f} units")
-            col2.metric("All SKUs Last 3-Month Actual Sales", f"{all_sku_last_3['qty'].sum():,.0f} units")
-            col3.metric("All SKUs Last 1-Month Actual Sales", f"{all_sku_last_1['qty'].sum():,.0f} units")
-            
-            col1.metric("All SKUs Total Forecasted Demand (Next 6-Months)", f"{reco_df[reco_df['horizon'] == '6-Month']['total_forecasted_demand'].sum():,.0f} units")
-            col2.metric("All SKUs Total Forecasted Demand (Next 3-Months)", f"{reco_df[reco_df['horizon'] == '3-Month']['total_forecasted_demand'].sum():,.0f} units")
-            col3.metric("All SKUs Total Forecasted Demand (Next 1-Month)", f"{reco_df[reco_df['horizon'] == '1-Month']['total_forecasted_demand'].sum():,.0f} units")
-            st.markdown("---")
-           
-            st.subheader("📊 Top SKUs by Forecasted Demand", divider="blue")
+            col1.metric("Last 6-Months", f"{all_sku_last_6['qty'].sum():,.0f} units")
+            col2.metric("Last 3-Months", f"{all_sku_last_3['qty'].sum():,.0f} units")
+            col3.metric("Last 1-Month", f"{all_sku_last_1['qty'].sum():,.0f} units")
 
-            # Add a number input for user to select top_n
-            top_n = st.number_input("Select number of top SKUs to display:", min_value=1, max_value=100, value=50, step=1)
+    # Row 2: Forecasted Demand
+    with st.container(border=True):
+        st.markdown("**Next Forecasted Demand (All SKUs)**")
+        col1, col2, col3 = st.columns(3)
+        if not reco_df.empty:
+            total_forecasted_6 = reco_df[reco_df['horizon'] == '6-Month']['total_forecasted_demand'].sum()
+            total_forecasted_3 = reco_df[reco_df['horizon'] == '3-Month']['total_forecasted_demand'].sum()
+            total_forecasted_1 = reco_df[reco_df['horizon'] == '1-Month']['total_forecasted_demand'].sum()
+            col1.metric("Next 6-Months", f"{total_forecasted_6:,.0f} units")
+            col2.metric("Next 3-Months", f"{total_forecasted_3:,.0f} units")
+            col3.metric("Next 1-Month", f"{total_forecasted_1:,.0f} units")
 
-            col1, col2, col3 = st.columns(3)
+    st.markdown("---")
 
-            with col1:
-                st.markdown("**1-Month Forecast**")
-                top_1m = get_top_skus_by_forecast(reco_df, top_n=top_n, months=1)
-                if not top_1m.empty:
-                    # Only convert numeric columns to int
-                    for col in top_1m.select_dtypes(include='number').columns:
-                        top_1m[col] = top_1m[col].round(0).astype(int)
-                    st.dataframe(top_1m, use_container_width=True, hide_index=True)
-                else:
-                    st.info(f"No SKUs found with forecasted demand data for the next 1 month.")
+    # --- Top SKUs by Forecast ---
+    st.subheader("📊 Top SKUs by Forecasted Demand", divider="blue")
+    top_n = st.number_input("Select number of top SKUs to display:", min_value=1, max_value=100, value=10, step=1)
 
-            with col2:
-                st.markdown("**3-Month Forecast**")
-                top_3m = get_top_skus_by_forecast(reco_df, top_n=top_n, months=3)
-                if not top_3m.empty:
-                    for col in top_3m.select_dtypes(include='number').columns:
-                        top_3m[col] = top_3m[col].round(0).astype(int)
-                    st.dataframe(top_3m, use_container_width=True, hide_index=True)
-                else:
-                    st.info(f"No SKUs found with forecasted demand data for the next 3 months.")
+    horizons = [(1, "1-Month"), (3, "3-Month"), (6, "6-Month")]
+    cols = st.columns(len(horizons))
 
-            with col3:
-                st.markdown("**6-Month Forecast**")
-                top_6m = get_top_skus_by_forecast(reco_df, top_n=top_n, months=6)
-                if not top_6m.empty:
-                    for col in top_6m.select_dtypes(include='number').columns:
-                        top_6m[col] = top_6m[col].round(0).astype(int)
-                    st.dataframe(top_6m, use_container_width=True, hide_index=True)
-                else:
-                    st.info(f"No SKUs found with forecasted demand data for the next 6 months.")
-
-            # Add download button for all SKUs forecast data
-            st.markdown("---")
-            st.subheader("📥 Download Complete Forecast Data", divider="blue")
-            
-            if not reco_df.empty:
-                # Prepare download data with timestamp
-                download_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                download_filename = f"all_skus_forecast_{download_timestamp}.csv"
-                
-                # Create a clean version of the data for download
-                download_data = reco_df.copy()
-                
-                # Round numeric columns for cleaner output
-                numeric_columns = download_data.select_dtypes(include='number').columns
-                for col in numeric_columns:
-                    download_data[col] = download_data[col].round(2)
-                
-                # Sort by item_id and horizon for better organization
-                download_data = download_data.sort_values(['item_id', 'horizon'])
-                
-                col1, col2, col3 = st.columns([1, 1, 2])
-                
-                with col1:
-                    st.metric("Total SKUs", f"{len(download_data['item_id'].unique()):,}")
-                
-                with col2:
-                    st.metric("Total Records", f"{len(download_data):,}")
-                
-                with col3:
-                    st.download_button(
-                        label="📥 Download All SKUs Forecast (CSV)",
-                        data=download_data.to_csv(index=False).encode('utf-8'),
-                        file_name=download_filename,
-                        mime='text/csv',
-                        use_container_width=True,
-                        help="Download complete forecast data for all SKUs across all horizons and channels"
-                    )
-                
-                # Show preview of download data
-                with st.expander("📋 Preview Download Data", expanded=False):
-                    st.dataframe(download_data.head(20), use_container_width=True, hide_index=True)
-                    st.caption(f"Showing first 20 rows of {len(download_data)} total records")
+    for i, (months, horizon_label) in enumerate(horizons):
+        with cols[i]:
+            st.markdown(f"**{horizon_label} Forecast**")
+            top_data = get_top_skus_by_forecast(reco_df, top_n=top_n, months=months)
+            if not top_data.empty:
+                # Format numeric columns to be clean integers
+                for col in top_data.select_dtypes(include='number').columns:
+                    top_data[col] = top_data[col].round(0).astype(int)
+                st.dataframe(top_data, use_container_width=True, hide_index=True)
             else:
-                st.info("No forecast data available for download.")
+                st.info(f"No forecast data for the next {months} months.")
     
-    # --- 2. Define Functions to Use Real Data ---
+    st.markdown("---")
 
-    def get_total_forecasted_units(recommendations, horizon_str):
-        """Calculates total forecasted units for a given horizon."""
-        if recommendations is None or recommendations.empty:
-            return 0
+    # --- Download All Forecast Data ---
+    st.subheader("📥 Download Complete Forecast Data", divider="blue")
+    if not reco_df.empty:
+        col1, col2, col3 = st.columns([1, 1, 2])
         
-        # Filter for the specific forecast horizon (e.g., '1-Month')
-        horizon_demand = recommendations[recommendations['horizon'] == horizon_str]
-        return horizon_demand['total_forecasted_demand'].sum()
+        # Prepare data for download
+        download_data = reco_df.sort_values(['item_id', 'horizon']).copy()
+        for col in download_data.select_dtypes(include='number').columns:
+            download_data[col] = download_data[col].round(2)
 
-    def get_top_skus_by_forecast(recommendations):
-        """Gets the top 5 SKUs based on the 1-month demand forecast."""
-        if recommendations is None or recommendations.empty:
-            return pd.DataFrame({'SKU': [], 'Forecasted Demand (Next 30D)': []})
-
-        # Get 1-Month forecast, group by SKU, and sum demand
-        one_month_forecast = recommendations[recommendations['horizon'] == '1-Month']
-        top_skus = one_month_forecast.groupby('item_id')['total_forecasted_demand'].sum()
-        top_skus = top_skus.sort_values(ascending=False).head(5).reset_index()
-        top_skus.rename(columns={'item_id': 'SKU', 'total_forecasted_demand': 'Forecasted Demand (Next 30D)'}, inplace=True)
-        return top_skus
-    
-    def get_actual_sales_data(sales):
-        """Gets actual sales data for the last 6 months."""
-        if sales is None or sales.empty:
-            return pd.DataFrame({'Month': [], 'Actual Sales': []})
+        with col1:
+            st.metric("Total SKUs", f"{len(download_data['item_id'].unique()):,}")
+        with col2:
+            st.metric("Total Records", f"{len(download_data):,}")
+        with col3:
+            st.download_button(
+                label="📥 Download All SKUs Forecast (CSV)",
+                data=download_data.to_csv(index=False).encode('utf-8'),
+                file_name=f"all_skus_forecast_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime='text/csv',
+                use_container_width=True,
+                help="Download complete forecast data for all SKUs and horizons."
+            )
         
-        sales['timestamp'] = pd.to_datetime(sales['created_at'])
-        # Ensure we only look at the last 6 full months
-        end_date = datetime.now().replace(day=1) - pd.Timedelta(days=1)
-        start_date = end_date - pd.DateOffset(months=6)
-        
-        # Filter, group by month, and sum sales
-        monthly_sales = sales[(sales['timestamp'] >= start_date) & (sales['timestamp'] <= end_date)]
-        monthly_sales = monthly_sales.set_index('timestamp').groupby(pd.Grouper(freq='ME'))['qty'].sum().reset_index()
-        monthly_sales['Month'] = monthly_sales['timestamp'].dt.strftime('%Y-%m')
-        return monthly_sales[['Month', 'qty']].rename(columns={'qty': 'Actual Sales'})
-
-    # --- Placeholder functions for complex KPIs ---
-    def get_inventory_turnover():
-        # NOTE: Requires COGS and Average Inventory data, which is not available.
-        return 4.2
-
-    def get_sell_through_rate():
-        # NOTE: Requires Units Received data, which is not available.
-        return 65.4
-
-    # --- 3. Build the Dashboard ---
-    st.subheader("Key Performance Indicators (KPIs)", divider='blue')
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric(label="Inventory Turnover", value=f"{get_inventory_turnover()}x", help="NOTE: This is a placeholder value.")
-        
-    with col2:
-        st.metric(label="Sell-Through Rate", value=f"{get_sell_through_rate()}%", help="NOTE: This is a placeholder value.")
-
-    with col3:
-        # Using real data for forecasted units
-        forecasted_units_30d = get_total_forecasted_units(reco_df, '1-Month')
-        st.metric(label="Forecasted Units (Next 30D)", value=f"{forecasted_units_30d:,.0f}")
+        with st.expander("📋 Preview Download Data"):
+            st.dataframe(download_data.head(20), use_container_width=True, hide_index=True)
+            st.caption(f"Showing first 20 rows of {len(download_data):,} total records.")
+    else:
+        st.info("No forecast data available to download.")
 
 # elif page == "Inventory Optimization":
 #     st.header("📦 Inventory Optimization & Simulation")
