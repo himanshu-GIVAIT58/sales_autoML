@@ -148,9 +148,9 @@ def capture_feedback(selected_sku: str, sku_data: pd.DataFrame):
                 save_feedback(selected_sku, sku_data, feedback_value)
 
 st.sidebar.title("Navigation")
-page = st.sidebar.radio("Go to:", ["Recommendations", "New SKU Forecast","Promotion Analysis","Seasonal Analysis","Executive Summary","Inventory Optimization"])
+page = st.sidebar.radio("Go to:", ["Inventory Recommendations", "New SKU Forecast","Promotion Analysis","Seasonal Analysis","Executive Summary"])
 
-if page == "Recommendations":
+if page == "Inventory Recommendations":
     reco_df = load_latest_recommendation_data()
     if reco_df is None or reco_df.empty:
         st.info("ℹ️ Awaiting recommendation data. Please ensure the main pipeline has run.", icon="⏳")
