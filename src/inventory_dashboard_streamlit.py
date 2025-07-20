@@ -16,7 +16,7 @@ from src.seasonal_analysis import identify_seasonal_skus,calculate_seasonal_stre
 from statsmodels.tsa.seasonal import seasonal_decompose
 from urllib.parse import quote_plus
 from src import dbConnect
-
+from src.promo_analyzer import analyze_sku_growth
 
 load_dotenv()
 
@@ -126,18 +126,21 @@ def save_feedback(selected_sku: str, sku_data: pd.DataFrame, feedback: str):
     except Exception as e:
         st.error(f"⚠️ An error occurred while saving feedback: {str(e)}", icon="🚨")
 
-def capture_feedback(selected_sku: str, sku_data: pd.Series):
+def capture_feedback(selected_sku: str, sku_data: pd.DataFrame):
     st.subheader("Was this forecast helpful?", divider="green")
     
-    feedback_col1, feedback_col2 = st.columns(2)
+    feedback_options = [
+        ("👍 Good Forecast", "Good forecast"),
+        ("📈 Forecast Too High", "Forecast too high"),
+        ("📉 Forecast Too Low", "Forecast too low"),
+        ("🚨 Stockout Occurred", "Stockout occurred"),
+    ]
+    cols = st.columns(len(feedback_options))
 
-    with feedback_col1:
-        if st.button("👍 Good Forecast", use_container_width=True):
-            save_feedback(selected_sku, sku_data, "Good")
-
-    with feedback_col2:
-        if st.button("👎 Bad Forecast", use_container_width=True):
-            save_feedback(selected_sku, sku_data, "Bad")
+    for i, (label, feedback_value) in enumerate(feedback_options):
+        with cols[i]:
+            if st.button(label, use_container_width=True, key=f"feedback_{feedback_value}_{selected_sku}"):
+                save_feedback(selected_sku, sku_data, feedback_value)
 
 st.sidebar.title("Navigation")
 page = st.sidebar.radio("Go to:", ["Recommendations", "New SKU Forecast","Promotion Analysis","Seasonal Analysis","Executive Summary","Inventory Optimization"])
@@ -292,51 +295,83 @@ elif page == "New SKU Forecast":
             st.error(f"Error reading the uploaded file: {str(e)}")
 
 elif page == "Promotion Analysis":
-    st.header("🔬 Promotion Effectiveness Analysis")
+    st.header("🔬 Simple Promotion Growth Analysis")
+    st.markdown("Compare sales performance during a promotion period against the time immediately before it.")
+
+    try:
+        sales_data = load_dataframe_from_mongo("sales_data")
+        all_skus = sorted(sales_data['sku'].unique())
+    except Exception as e:
+        st.error(f"Failed to load sales data from MongoDB: {e}")
+        st.stop()
     
-    lookback_days = st.slider(
-        "Select analysis period (days):", 
-        min_value=184, 
-        max_value=365, 
-        value=200, 
-        step=7
+    # --- User Inputs ---
+    st.subheader("1. Select Promotion Details", divider="blue")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        # Example: Jan 1, 2025 to April 30, 2025
+        promo_start = st.date_input("Promotion Start Date", datetime(2025, 1, 1))
+    with col2:
+        promo_end = st.date_input("Promotion End Date", datetime(2025, 4, 30))
+
+    selected_skus = st.multiselect("Select SKUs to Analyze", all_skus, default=all_skus[:3])
+    
+    before_period_days = st.slider(
+        "Comparison Period (Days Before Promotion)", 
+        min_value=30, 
+        max_value=180, 
+        value=90, 
+        help="How many days before the promotion start date should be used for comparison?"
     )
 
-    if st.button("🚀 Run Analysis", use_container_width=True):
-        with st.spinner("Analyzing promotion performance... This may take a moment."):
-            try:
-                predictor = load_latest_predictor()
-                if predictor is None:
-                    st.error("🚨 Could not load a trained model. Please run the main training pipeline first.")
-                    st.stop()
+    # --- Run Analysis ---
+    if st.button("🚀 Analyze SKU Growth", use_container_width=True, type="primary"):
+        if not selected_skus:
+            st.warning("Please select at least one SKU to analyze.")
+        elif promo_start >= promo_end:
+            st.error("The promotion start date must be before the end date.")
+        else:
+            with st.spinner("Analyzing growth..."):
+                results_df = analyze_sku_growth(sales_data, selected_skus, promo_start, promo_end, before_period_days)
                 
-                lift_summary_df = analyze_promotion_lift(predictor, lookback_days)
-                if lift_summary_df.empty:
-                    st.write(lift_summary_df)
-                    st.warning("No promotion data was found in the selected period to analyze.")
-                else:
-                    st.subheader("Promotion Performance Summary")
-                    st.caption(f"Comparing actual sales vs. forecasted sales without promotions over the last {lookback_days} days.")
-                    
-                    
-                    st.dataframe(lift_summary_df,
-                        column_config={
-                            "total_actual_sales": st.column_config.NumberColumn("Actual Sales", format="%d units"),
-                            "total_forecasted_sales_no_promo": st.column_config.NumberColumn("Est. Sales w/o Promo", format="%d units"),
-                            "total_lift_units": st.column_config.NumberColumn("Sales Lift (Units)", format="%d"),
-                            "percentage_lift": st.column_config.ProgressColumn(
-                                "Sales Lift (%)",
-                                help="The percentage increase in sales attributable to promotions.",
-                                format="%.2f%%",
-                                min_value=lift_summary_df['percentage_lift'].min(),
-                                max_value=lift_summary_df['percentage_lift'].max(),
-                            ),
-                        },
-                        use_container_width=True
-                    )
-            except Exception as e:
-                st.error(f"An error occurred during analysis: {e}")
+                st.subheader("2. Analysis Results", divider="blue")
+                st.markdown(f"Comparing the promotion period (`{promo_start}` to `{promo_end}`) with the **{before_period_days} days** prior.")
 
+                # Display the results table
+                st.dataframe(results_df, use_container_width=True, hide_index=True,
+                    column_config={
+                        "Total Sales (Before)": st.column_config.NumberColumn(format="%d"),
+                        "Avg Daily Sales (Before)": st.column_config.NumberColumn(format="%.2f"),
+                        "Total Sales (Promo)": st.column_config.NumberColumn(format="%d"),
+                        "Avg Daily Sales (Promo)": st.column_config.NumberColumn(format="%.2f"),
+                        "Growth (%)": st.column_config.ProgressColumn(
+                            format="%.1f%%",
+                            min_value=float(results_df['Growth (%)'].min()),
+                            max_value=float(results_df['Growth (%)'].max())
+                        ),
+                    }
+                )
+
+                # Display a chart
+                st.subheader("3. Visual Comparison", divider="blue")
+                chart_data = results_df.melt(
+                    id_vars="SKU",
+                    value_vars=["Avg Daily Sales (Before)", "Avg Daily Sales (Promo)"],
+                    var_name="Period",
+                    value_name="Avg Daily Sales"
+                )
+                
+                bar_chart = alt.Chart(chart_data).mark_bar().encode(
+                    x=alt.X('SKU:N', title='SKU', sort='-y'),
+                    y=alt.Y('Avg Daily Sales:Q', title='Average Daily Sales (Units)'),
+                    color='Period:N',
+                    tooltip=['SKU', 'Period', 'Avg Daily Sales']
+                ).properties(
+                    title="Average Daily Sales: Before vs. During Promotion"
+                )
+                st.altair_chart(bar_chart, use_container_width=True)
+                
 elif page == "Seasonal Analysis":
     st.header("❄️ Advanced Seasonal SKU Analysis Dashboard")
 

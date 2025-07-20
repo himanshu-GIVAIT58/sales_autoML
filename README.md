@@ -96,7 +96,7 @@ The core of the project is an automated pipeline orchestrated by `src/main.py`. 
 
 ## 🚀 How to Use
 
-### ▶️ Running the Training Pipeline
+### Running the Training Pipeline
 
 To retrain the model with the latest data and generate new recommendations:
 

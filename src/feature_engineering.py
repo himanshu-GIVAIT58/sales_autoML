@@ -1,8 +1,10 @@
 import pandas as pd
 from typing import Tuple, List, Optional
+import requests
+from requests.structures import CaseInsensitiveDict
+
 
 def create_seasonal_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Adds time-based seasonal features relevant to jewelry sales."""
     df['month'] = df['timestamp'].dt.month
     df['day_of_week'] = df['timestamp'].dt.dayofweek
     df['is_weekend'] = (df['day_of_week'] >= 5).astype(int)
@@ -12,16 +14,6 @@ def create_seasonal_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def add_feedback_features(main_df: pd.DataFrame, feedback_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Engineers features from user feedback and merges them into the main dataframe.
-
-    Args:
-        main_df: The main dataframe with sales and other features.
-        feedback_df: The dataframe loaded from the 'feedback_data' collection.
-
-    Returns:
-        The main dataframe with added feedback features.
-    """
     if feedback_df.empty:
         print("   -> No feedback data to process. Skipping feedback feature engineering.")
         main_df['feedback_score_30d_avg'] = 0
@@ -84,6 +76,29 @@ def create_trend_features(df: pd.DataFrame) -> pd.DataFrame:
     df['potential_lost_sales'] = df['potential_lost_sales'].fillna(0)
     return df
 
+def create_intermittency_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Creates features that describe the pattern of zero vs. non-zero sales."""
+    df = df.sort_values(by=['item_id', 'timestamp'])
+    
+    # Feature 1: Time since the last sale for each item
+    # This helps the model understand how long an item has been dormant.
+    df['last_sale_date'] = df['timestamp'].where(df['target'] > 0)
+    df['last_sale_date'] = df.groupby('item_id')['last_sale_date'].ffill()
+    df['time_since_last_sale'] = (df['timestamp'] - df['last_sale_date']).dt.days.fillna(0)
+    
+    # Feature 2: Number of sale days in the last week
+    # This gives the model a sense of recent sales frequency.
+    df['sale_occurred'] = (df['target'] > 0).astype(int)
+    rolling_sales_days = df.groupby('item_id')['sale_occurred'].transform(
+        lambda x: x.shift(1).rolling(7, min_periods=1).sum()
+    )
+    df['days_with_sales_last_7d'] = rolling_sales_days.fillna(0)
+    
+    # Clean up temporary columns
+    df = df.drop(columns=['last_sale_date', 'sale_occurred'])
+    
+    return df
+
 def generate_static_features(df: pd.DataFrame, all_training_columns: Optional[List[str]] = None) -> pd.DataFrame:
     """Generates a one-hot encoded static features DataFrame from a base DataFrame."""
     df_static = df.copy()
@@ -99,11 +114,75 @@ def generate_static_features(df: pd.DataFrame, all_training_columns: Optional[Li
         static_features_df = static_features_df.reindex(columns=all_training_columns, fill_value=0)
     return static_features_df
 
+def fetch_silver_prices(start_date, end_date):
+    # Convert dates to string format if they are datetime objects
+    start_date = pd.to_datetime(start_date).strftime('%Y-%m-%d')
+    end_date = pd.to_datetime(end_date).strftime('%Y-%m-%d')
+    
+    # API request setup
+    url = f"https://api.metals.dev/v1/timeseries?api_key=P4LEGMQB91UYAJI8DR4W902I8DR4W&start_date={start_date}&end_date={end_date}"
+    headers = CaseInsensitiveDict()
+    headers["Accept"] = "application/json"
+    
+    # Make API request
+    try:
+        resp = requests.get(url, headers=headers)
+        resp.raise_for_status()  # Raise an error for bad status codes
+        data = resp.json()
+    except requests.RequestException as e:
+        print(f"Error fetching metal prices: {e}")
+        return pd.DataFrame({
+            'timestamp': [],
+            'silver_price_change': [],
+            'silver_price_ma_7': [],
+            'gold_price_change': [],
+            'gold_price_ma_7': []
+        })
+    
+    # Extract silver and gold prices and INR exchange rates
+    rates = data.get('rates', {})
+    metal_data = []
+    for date, info in rates.items():
+        silver_price_usd = info['metals'].get('silver', 0)
+        gold_price_usd = info['metals'].get('gold', 0)
+        usd_to_inr = info['currencies'].get('INR', 0)
+        if usd_to_inr > 0:  # Avoid division by zero
+            silver_price_inr = silver_price_usd / usd_to_inr
+            gold_price_inr = gold_price_usd / usd_to_inr
+        else:
+            silver_price_inr = 0
+            gold_price_inr = 0
+        metal_data.append({
+            'date': date,
+            'silver_price_inr': silver_price_inr,
+            'gold_price_inr': gold_price_inr
+        })
+    
+    # Create DataFrame
+    metal_prices = pd.DataFrame(metal_data)
+    if metal_prices.empty:
+        print("No metal price data available.")
+        return pd.DataFrame({
+            'timestamp': [],
+            'silver_price_change': [],
+            'silver_price_ma_7': [],
+            'gold_price_change': [],
+            'gold_price_ma_7': []
+        })
+    
+    # Process DataFrame
+    metal_prices['timestamp'] = pd.to_datetime(metal_prices['date'])
+    metal_prices['silver_price_change'] = metal_prices['silver_price_inr'].pct_change().fillna(0)
+    metal_prices['silver_price_ma_7'] = metal_prices['silver_price_inr'].rolling(window=7, min_periods=1).mean().fillna(0)
+    metal_prices['gold_price_change'] = metal_prices['gold_price_inr'].pct_change().fillna(0)
+    metal_prices['gold_price_ma_7'] = metal_prices['gold_price_inr'].rolling(window=7, min_periods=1).mean().fillna(0)
+    
+    return metal_prices[['timestamp', 'silver_price_change', 'silver_price_ma_7', 'gold_price_change', 'gold_price_ma_7']]
+
 def prepare_data(source_data: pd.DataFrame, inventory_data: pd.DataFrame, holidays_data: pd.DataFrame, max_skus: Optional[int] = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Executes the full data preparation and feature engineering pipeline."""
     print("\nPreparing and regularizing data...")
 
-    
     if max_skus is not None:
         print(f"Identifying top {max_skus} SKUs to reduce memory usage...")
         sku_sales_totals = source_data.groupby('sku')['qty'].sum().sort_values(ascending=False)
@@ -112,7 +191,6 @@ def prepare_data(source_data: pd.DataFrame, inventory_data: pd.DataFrame, holida
         inventory_data = inventory_data[inventory_data["sku"].isin(top_n_skus)].copy()
         print(f"Data now contains only the top {len(top_n_skus)} SKUs.")
 
-    
     sales_df = source_data[['created_at', 'sku', 'qty', 'category', 'gender', 'disc', 'Channel']].copy()
     sales_df['channel'] = sales_df['Channel'].str.strip().fillna('Unknown')
     sales_df.rename(columns={"created_at": "timestamp", "qty": "target"}, inplace=True)
@@ -132,54 +210,53 @@ def prepare_data(source_data: pd.DataFrame, inventory_data: pd.DataFrame, holida
     holidays_df['is_holiday'] = 1
     holidays_df = holidays_df.drop_duplicates(subset=['timestamp'])
 
-    
     df = pd.merge(sales_df, inventory_daily_df, on=["sku", "timestamp"], how="left")
-
-    
-    
     df['warehouse_qty'] = pd.to_numeric(df['warehouse_qty'], errors='coerce').fillna(1)
-    
-    
-    df = create_seasonal_features(df)
-    df = create_price_elasticity_features(df)
-    df = create_inventory_features(df) 
-    df = create_trend_features(df)
-    
-    df['gold_price_change'] = 0.0
-    df['gold_price_ma_7'] = 0.0
     df['item_id'] = df['sku'].astype(str) + "_" + df['channel'].astype(str)
 
-    
-    print("Generating static features...")
-    static_features_df = generate_static_features(df)
-    print(f"✅ Generated static features. Column names: {list(static_features_df.columns)}")
-
-    
-    agg_cols = [c for c in df.columns if c not in ['sku', 'channel', 'target', 'timestamp', 'item_id', 'disc', 'Channel', 'category', 'gender', 'brand_category', 'category_channel']]
+    # Fixed aggregation logic to include 'disc' column
+    agg_cols = [c for c in df.columns if c not in ['sku', 'channel', 'target', 'timestamp', 'item_id', 'Channel', 'category', 'gender', 'brand_category', 'category_channel']]
     agg_dict = {col: "first" for col in agg_cols}
     agg_dict['target'] = "sum"
+    agg_dict['disc'] = "mean"
     df_daily = df.groupby(["item_id", "sku", "channel", "timestamp"]).agg(agg_dict).reset_index()
 
-    
     all_items = df_daily["item_id"].unique().tolist()
     date_range = pd.date_range(start=df_daily["timestamp"].min(), end=df_daily["timestamp"].max(), freq='D')
     multi_index = pd.MultiIndex.from_product([all_items, list(date_range)], names=["item_id", "timestamp"])
     regularized_data = pd.DataFrame(index=multi_index).reset_index()
     regularized_data = pd.merge(regularized_data, df_daily, on=["item_id", "timestamp"], how="left")
 
-    
     print("   -> Propagating static attributes and filling data gaps...")
     id_to_static_map = df[['item_id', 'sku', 'channel']].drop_duplicates()
     regularized_data = regularized_data.drop(columns=['sku', 'channel'], errors='ignore')
     regularized_data = pd.merge(regularized_data, id_to_static_map, on='item_id', how='left')
 
+    # Call all feature creation functions on the regularized data
+    regularized_data = create_seasonal_features(regularized_data)
+    regularized_data = create_price_elasticity_features(regularized_data)
+    regularized_data = create_inventory_features(regularized_data) 
+    regularized_data = create_trend_features(regularized_data)
+    regularized_data = create_intermittency_features(regularized_data)
+
     seasonal_cols = [col for col in regularized_data.columns if any(x in col for x in ['month', 'day_of_week', 'is_weekend', 'is_wedding_season', 'is_diwali_period', 'is_valentine_month'])]
     if seasonal_cols:
         regularized_data[seasonal_cols] = regularized_data.groupby('item_id')[seasonal_cols].transform(lambda x: x.ffill().bfill())
 
-    regularized_data = pd.merge(regularized_data, holidays_df, on="timestamp", how="left")
+    # Fetch and merge silver and gold prices
+    metal_prices = fetch_silver_prices(df['timestamp'].max()-pd.DateOffset(days=30), df['timestamp'].max())
+    regularized_data = pd.merge(regularized_data, metal_prices, on='timestamp', how='left')
+    regularized_data['silver_price_change'] = regularized_data['silver_price_change'].fillna(0)
+    regularized_data['silver_price_ma_7'] = regularized_data['silver_price_ma_7'].fillna(0)
+    regularized_data['gold_price_change'] = regularized_data['gold_price_change'].fillna(0)
+    regularized_data['gold_price_ma_7'] = regularized_data['gold_price_ma_7'].fillna(0)
+
     regularized_data = regularized_data.fillna(0)
-    
+
+    print("Generating static features...")
+    static_features_df = generate_static_features(regularized_data)
+    print(f"✅ Generated static features. Column names: {list(static_features_df.columns)}")
+
     print("Data preparation and feature engineering complete.")
     return regularized_data, static_features_df
 

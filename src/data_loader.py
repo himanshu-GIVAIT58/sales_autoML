@@ -16,13 +16,11 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-
 MONGO_DB_NAME = dbConnect.mongo_db_name
 MONGO_URI = dbConnect.connection_uri
 
 @contextmanager
 def get_mongo_client(mongo_uri: str = MONGO_URI) -> Iterator[MongoClient]:
-    """Provides a MongoDB client connection as a context manager."""
     client = None
     try:
         client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
@@ -50,9 +48,6 @@ def get_top_skus_by_forecast(
     top_n: int = 5, 
     months: int = 1
 ) -> pd.DataFrame:
-    """
-    Returns the top N SKUs by forecasted demand for the given number of months.
-    """
     if recommendations is None or recommendations.empty:
         return pd.DataFrame(columns=['SKU', f'Forecasted Demand (Next {months}M)'])
     
@@ -72,7 +67,6 @@ def get_top_skus_by_forecast(
     return top_skus
 
 def save_dataframe_to_mongo(df: pd.DataFrame, collection_name: str, mongo_uri: str = MONGO_URI, db_name: str = MONGO_DB_NAME):
-    """Saves a DataFrame to a specified MongoDB collection, clearing old data first."""
     try:
         with get_mongo_client(mongo_uri) as client:
             db = client[db_name]
@@ -94,7 +88,6 @@ def save_dataframe_to_mongo(df: pd.DataFrame, collection_name: str, mongo_uri: s
         logger.error(f"An unexpected error occurred during save: {e}")
 
 def load_dataframe_from_mongo(collection_name: str, query: Dict = None, mongo_uri: str = MONGO_URI, db_name: str = MONGO_DB_NAME) -> pd.DataFrame:
-    """Loads data from a MongoDB collection into a pandas DataFrame based on a query."""
     try:
         with get_mongo_client(mongo_uri) as client:
             db = client[db_name]
@@ -114,7 +107,6 @@ def load_dataframe_from_mongo(collection_name: str, query: Dict = None, mongo_ur
     return pd.DataFrame()
 
 def _clean_numeric_string(value: Any) -> float:
-    """Removes commas from a string and converts it to a number, handling non-string types."""
     if pd.isna(value):
         return 0.0
     if isinstance(value, str):
@@ -133,10 +125,6 @@ def get_last_n_months_sales(
     mongo_uri: str = MONGO_URI,
     db_name: str = MONGO_DB_NAME
 ) -> pd.DataFrame:
-    """
-    Correctly loads historical sales data by parsing the base SKU from the item_id
-    and then filtering by date in pandas to handle string-based dates.
-    """
     logger.info(f"Attempting to load sales data for item_ids: {sku_list} for the last {months_back} months.")
     
     query = {}
@@ -219,17 +207,12 @@ def load_product_prices(mongo_uri, db_name, collection_name="sales_data"):
         client = MongoClient(mongo_uri)
         db = client[db_name]
         collection = db[collection_name]
-        
-        
         data = list(collection.find({}, {'sku': 1, 'revenue': 1, 'disc': 1, 'qty': 1}))
         if not data:
             print("Warning: No sales data found to calculate prices.")
             return {}
 
         df = pd.DataFrame(data)
-
-        
-        
         for col in ['revenue', 'disc']:
             df[col] = df[col].astype(str).str.replace(',', '', regex=False)
             df[col] = pd.to_numeric(df[col], errors='coerce')

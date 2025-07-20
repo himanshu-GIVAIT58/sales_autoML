@@ -91,40 +91,36 @@ def main():
 
     # --- Step 5: Model Training and Evaluation ---
     print("\nStep 5: Training or fine-tuning the model...")
-    # MODIFIED: Call the new training function
     predictors = model_handler.train_multiple_predictors(ts_data, config)
     print("   -> All model presets trained. Evaluating...")
-    # MODIFIED: Evaluate all trained predictors
     leaderboard_df = model_handler.evaluate_predictors(predictors, ts_data)
 
-    # To get a single metric for the validation pipeline, we can use the best score
-    # from the best preset. Let's assume the last preset in the list is the "best".
     best_preset_name = config.TRAINING['PRESETS'][-1]
     best_predictor = predictors[best_preset_name]
     new_performance_metrics = best_predictor.evaluate(ts_data)
     if new_performance_metrics is None:
         new_performance_metrics = {'MASE': 999}
-    
-    mase = new_performance_metrics.get('MASE', 'N/A')
-    if mase != 'N/A':
+
+    mase = new_performance_metrics.get('MASE')
+    if mase is not None:
+        print(f"   -> 📈 Best preset '{best_preset_name}' evaluation metrics: MASE={mase:.4f}")
+    elif mase is not None:
         print(f"   -> 📈 Best preset '{best_preset_name}' evaluation metrics: MASE={mase:.4f}")
     else:
-        print(f"   -> 📈 Best preset '{best_preset_name}' evaluation metrics: MASE={mase}")
+        print(f"   -> 📈 Best preset '{best_preset_name}' evaluation metrics: No valid metric found.")
 
-    # ====================================================================
-    # --- NEW: Model Validation Gate ---
-    # ====================================================================
-    
+    # --- Step 6: Model Validation Gate ---
     print("\nStep 6: Running Model Validation Pipeline...")
     unique_run_id = f"inventory_recommendations_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
     
-    # The validation pipeline can still run on your highest-quality predictor
+    # This now calls the validation function that *only* checks performance
     validation_result = model_monitor.run_model_validation_pipeline(
         new_predictor=best_predictor,
         new_training_data=processed_data,
         new_performance_metrics=new_performance_metrics
     )
 
+    # --- Step 7: Logging model run ---
     print("\nStep 7: Logging model run with validation results...")
     model_monitor.log_model_run(
         predictor=best_predictor,

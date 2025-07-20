@@ -9,7 +9,7 @@ from src import dbConnect
 load_dotenv()
 
 DATA_FILES = {
-    "inventory_recommendations.csv": "inventory_recommendations_20250710_113711",
+    # "inventory_recommendations.csv": "inventory_recommendations_20250710_113711",
     # "indian_holidays.csv": "holidays_data",
     # "query_result_2025-05-28T18_02_43.550629445+05_30 (1).csv": "query_result",
     # "store_count.csv": "store_count",
@@ -76,7 +76,7 @@ def delete_inventory_recommendations_collections():
     collections = db.list_collection_names()
     deleted = []
     for name in collections:
-        if name.startswith("inventory_recommendations_") and name != "inventory_recommendations":
+        if name.startswith("model_runs"):
             db.drop_collection(name)
             deleted.append(name)
     client.close()

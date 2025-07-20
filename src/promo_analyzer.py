@@ -242,3 +242,60 @@ def analyze_promotion_lift(predictor: TimeSeriesPredictor, lookback_days=184):
     print('lift_summary',lift_summary)
     return lift_summary
 
+def analyze_sku_growth(sales_df, skus, promo_start, promo_end, before_days=90):
+    """
+    Performs a simple before-and-after analysis of SKU sales during a promotion.
+    """
+    # 1. Define the two time periods
+    promo_start_date = pd.to_datetime(promo_start)
+    promo_end_date = pd.to_datetime(promo_end)
+    
+    before_start_date = promo_start_date - pd.Timedelta(days=before_days)
+    before_end_date = promo_start_date - pd.Timedelta(days=1)
+
+    # 2. Filter data for the specified SKUs and the two periods
+    sku_sales = sales_df[sales_df['sku'].isin(skus)].copy()
+    
+    # --- THIS IS THE CORRECTED LINE ---
+    # It now correctly handles dates in Day/Month/Year format (e.g., 21/11/2023)
+    sku_sales['created_at'] = pd.to_datetime(sku_sales['created_at'], dayfirst=True, errors='coerce')
+    # ------------------------------------
+
+    before_period_sales = sku_sales[
+        (sku_sales['created_at'] >= before_start_date) & (sku_sales['created_at'] <= before_end_date)
+    ]
+    promo_period_sales = sku_sales[
+        (sku_sales['created_at'] >= promo_start_date) & (sku_sales['created_at'] <= promo_end_date)
+    ]
+
+    # 3. Calculate metrics for both periods
+    metrics = []
+    for sku in skus:
+        before_sku_sales = before_period_sales[before_period_sales['sku'] == sku]
+        promo_sku_sales = promo_period_sales[promo_period_sales['sku'] == sku]
+
+        # Calculate 'Before' metrics
+        total_sales_before = before_sku_sales['qty'].sum()
+        avg_daily_sales_before = total_sales_before / before_days if before_days > 0 else 0
+
+        # Calculate 'Promotion' metrics
+        promo_duration_days = (promo_end_date - promo_start_date).days + 1
+        total_sales_promo = promo_sku_sales['qty'].sum()
+        avg_daily_sales_promo = total_sales_promo / promo_duration_days if promo_duration_days > 0 else 0
+
+        # Calculate growth
+        if avg_daily_sales_before > 0:
+            growth = ((avg_daily_sales_promo - avg_daily_sales_before) / avg_daily_sales_before) * 100
+        else:
+            growth = float('inf') # Infinite growth if sales were zero before
+
+        metrics.append({
+            "SKU": sku,
+            "Total Sales (Before)": total_sales_before,
+            "Avg Daily Sales (Before)": avg_daily_sales_before,
+            "Total Sales (Promo)": total_sales_promo,
+            "Avg Daily Sales (Promo)": avg_daily_sales_promo,
+            "Growth (%)": growth
+        })
+        
+    return pd.DataFrame(metrics)

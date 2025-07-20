@@ -33,6 +33,47 @@ def train_predictor(ts_data, config):
         print(f"❌ Error during model training: {e}")
         raise
 
+
+# Add this new function to src/model_handler.py
+
+def refit_final_ensemble(predictors: Dict[str, TimeSeriesPredictor], ts_data: TimeSeriesDataFrame) -> TimeSeriesPredictor:
+    """
+    Takes the best models from multiple predictors and refits them into a single, final ensemble.
+    """
+    print("\nCreating final ensemble from all presets...")
+    
+    # 1. Collect the names of the best models from each preset's leaderboard
+    best_models_from_each_preset = []
+    for preset, predictor in predictors.items():
+        best_model_name = predictor.model_best
+        # Ensure we don't add the top-level ensemble itself, only base models
+        if "WeightedEnsemble" not in best_model_name:
+             best_models_from_each_preset.append(best_model_name)
+    
+    # Remove duplicates
+    best_models_from_each_preset = sorted(list(set(best_models_from_each_preset)))
+    
+    print(f"  -> Found {len(best_models_from_each_preset)} unique best models to ensemble: {best_models_from_each_preset}")
+
+    # 2. Use the highest quality predictor as the base for refitting the final ensemble
+    # Assumes presets are ordered from lowest to highest quality in config
+    final_predictor = list(predictors.values())[-1] 
+    
+    # 3. Refit a new WeightedEnsemble using only the best models from all runs
+    final_predictor.fit(
+        train_data=ts_data,
+        hyperparameters={
+            "WeightedEnsemble": {
+                "models_to_ensemble": best_models_from_each_preset
+            }
+        },
+        time_limit=300 # Add a short time limit just for ensembling
+    )
+    
+    print("✅ Final ensembled predictor created successfully.")
+    return final_predictor
+
+    
 def train_multiple_predictors(ts_data: TimeSeriesDataFrame, config) -> Dict[str, TimeSeriesPredictor]:
     """
     Trains multiple TimeSeriesPredictor models, one for each preset specified in the config.
@@ -65,7 +106,7 @@ def train_multiple_predictors(ts_data: TimeSeriesDataFrame, config) -> Dict[str,
                 presets=preset,
                 time_limit=config.TRAINING['TIME_LIMIT'],
                 num_val_windows=config.TRAINING['NUM_VAL_WINDOWS'],
-                random_seed=config.TRAINING['RANDOM_SEED']
+                # random_seed=config.TRAINING['RANDOM_SEED']
             )
             predictors[preset] = predictor
             print(f"✅ Model training completed for preset: '{preset}'")
@@ -83,45 +124,40 @@ def make_ensembled_predictions(
     predictors: Dict[str, TimeSeriesPredictor], 
     ts_data: TimeSeriesDataFrame, 
     holidays_df: pd.DataFrame
-) -> pd.DataFrame:
-    """
-    Generates predictions from multiple models and creates a single ensembled forecast.
-    """
+) -> TimeSeriesDataFrame:
     all_predictions = []
     
-    # Generate future known covariates once, as they are the same for all models
-    # We use the first available predictor to create the future frame
     first_predictor = next(iter(predictors.values()))
     future_known_covariates = generate_future_covariates(first_predictor, ts_data, holidays_df)
 
     print("\nGenerating forecasts from each trained model preset...")
     for preset_name, predictor in predictors.items():
-        print(f"  -> Predicting with '{preset_name}' model...")
+        print(f"   -> Predicting with '{preset_name}' model...")
         try:
             predictions = predictor.predict(ts_data, known_covariates=future_known_covariates)
             predictions["model_preset"] = preset_name
             all_predictions.append(predictions.reset_index())
         except Exception as e:
-            print(f"  -> ⚠️ Could not generate predictions for preset '{preset_name}': {e}")
+            print(f"   -> ⚠️ Could not generate predictions for preset '{preset_name}': {e}")
             continue
 
     if not all_predictions:
         raise RuntimeError("Failed to generate predictions from any model.")
 
-    # Concatenate all predictions into a single DataFrame
     combined_predictions_df = pd.concat(all_predictions, ignore_index=True)
 
-    # Ensemble by averaging across models for each item and timestamp
     print("\nEnsembling predictions by averaging...")
-    # Columns to average: 'mean' and all quantile columns
     quantile_cols = [str(q) for q in first_predictor.quantile_levels]
     cols_to_average = ["mean"] + quantile_cols
     
-    ensembled_df = combined_predictions_df.groupby(["item_id", "timestamp"])[cols_to_average].mean().reset_index()
+    ensembled_df = combined_predictions_df.groupby(["item_id", "timestamp"])[cols_to_average].mean()
+    
+    # Convert the ensembled result back to a TimeSeriesDataFrame
+    # This sets the index correctly before returning
+    ensembled_ts_df = TimeSeriesDataFrame(ensembled_df)
     
     print("✅ Ensembled forecast generated successfully.")
-    return ensembled_df
-
+    return ensembled_ts_df
 def evaluate_predictors(predictors: Dict[str, TimeSeriesPredictor], ts_data: TimeSeriesDataFrame) -> pd.DataFrame:
     """Evaluates all trained predictors and returns a combined leaderboard."""
     all_leaderboards = []
