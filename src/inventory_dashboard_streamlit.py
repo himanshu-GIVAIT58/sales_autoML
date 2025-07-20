@@ -17,6 +17,11 @@ from statsmodels.tsa.seasonal import seasonal_decompose
 from urllib.parse import quote_plus
 from src import dbConnect
 from src.promo_analyzer import analyze_sku_growth
+# from src import auth 
+
+# token = auth.check_authentication()
+# if not token:
+#     st.stop()
 
 load_dotenv()
 

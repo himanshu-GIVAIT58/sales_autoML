@@ -18,3 +18,4 @@ scikit-learn
 statsmodels
 xgboost
 tf-keras
+streamlit-oauth
