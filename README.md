@@ -2,95 +2,118 @@
 
 ## 🚀 Overview
 
-This project provides an end-to-end, automated pipeline for forecasting future sales demand at the individual SKU level. It leverages the power of **AutoML with AutoGluon** to train robust time-series models, and includes a complete MLOps workflow for model validation, promotion, and versioning.
-
-The primary goal is to move beyond simple historical averages and generate **accurate, actionable inventory recommendations** (like Reorder Points and Economic Order Quantity) to:
-- Optimize stock levels
-- Reduce carrying costs
-- Prevent stockouts
-
-The entire system is managed through a **Python pipeline** that pulls data from **MongoDB**, and the results are visualized in an **interactive Streamlit dashboard**.
+This project provides an end-to-end, automated pipeline for forecasting future sales demand at the individual SKU level. It leverages **AutoML with AutoGluon** for robust time-series modeling and includes a complete MLOps workflow for model validation, promotion, and versioning. Results are visualized in an interactive Streamlit dashboard.
 
 ---
 
 ## ✨ Key Features
 
-- **Automated Training Pipeline**  
-  A single script (`main.py`) handles data loading, feature engineering, model training, and validation.
-
-- **SKU-Level Forecasting**  
-  Generates granular demand forecasts for every unique product SKU across different sales channels (Offline, App, Web).
-
-- **AutoML with AutoGluon**  
-  Automatically trains and evaluates a suite of time-series models—from simple baselines to complex deep learning models.
-
-- **Rich Feature Engineering**  
-  Includes:
-  - Sales history (lags, rolling averages, standard deviations)
-  - Calendar features (day of week, month)
-  - Holiday and special event data
-  - Inventory levels and stockout history
-  - Pricing and discount information
-
-- **ABC Analysis for Prioritization**  
-  Classifies products into **A, B, and C** categories based on sales volume to prioritize high-value items.
-
-- **Automated Model Validation**  
-  Implements a **champion-challenger** model comparison system. A new model is promoted only if it outperforms the current one.
-
-- **Inventory Metric Calculation**  
-  Converts forecasts into metrics like:
-  - Safety Stock
-  - Reorder Point (ROP)
-  - Economic Order Quantity (EOQ)
-
-- **Interactive Dashboard**  
-  A user-friendly **Streamlit app** for:
-  - Forecast visualization
-  - SKU performance analysis
-  - Inventory simulation
+- Automated training pipeline (`main.py`)
+- SKU-level forecasting across channels
+- AutoML with AutoGluon
+- Rich feature engineering (lags, calendar, holidays, inventory, pricing)
+- ABC analysis for SKU prioritization
+- Champion-challenger model validation
+- Inventory metric calculation (Safety Stock, ROP, EOQ)
+- Interactive Streamlit dashboard
 
 ---
 
-## ⚙️ How It Works: The Pipeline
+## ⚙️ Pipeline Steps
 
-The core of the project is an automated pipeline orchestrated by `src/main.py`. It executes the following steps:
-
-1. **Data Loading**  
-   Pulls sales, inventory, and holiday data from **MongoDB**.
-
-2. **Feature Engineering**  
-   Cleans and transforms data into meaningful input features.
-
-3. **ABC Analysis**  
-   Segments SKUs to focus on critical items.
-
-4. **Model Training**  
-   Uses **AutoGluon** to train multiple time-series models using specified quality presets (`fast_training`, `high_quality`, etc.).
-
-5. **Model Validation**
-   - Loads the current “champion” model.
-   - Compares it to the new model using recent data.
-   - Decides to **promote** or **reject** the new model based on improvement thresholds.
-
-6. **Recommendation Generation**
-   - If promoted, generates forecasts.
-   - Calculates inventory recommendations.
-
-7. **Saving & Logging**
-   - Saves recommendations to **MongoDB** (versioned).
-   - Logs model artifacts and validation metrics.
-   - Archives old recommendations.
+1. **Data Loading**: Pulls sales, inventory, and holiday data from MongoDB.
+2. **Feature Engineering**: Cleans and transforms data into input features.
+3. **ABC Analysis**: Segments SKUs for prioritization.
+4. **Model Training**: Trains multiple time-series models using AutoGluon.
+5. **Model Validation**: Compares new models to the current champion.
+6. **Recommendation Generation**: Generates forecasts and inventory recommendations.
+7. **Saving & Logging**: Saves recommendations and logs artifacts to MongoDB.
 
 ---
 
 ## 🛠️ Technology Stack
 
-- **Backend:** Python  
-- **Machine Learning:** AutoGluon (TimeSeries)  
-- **Data Storage:** MongoDB  
-- **Dashboard:** Streamlit  
-- **Core Libraries:** `pandas`, `scikit-learn`, `joblib`
+- Python, pandas, scikit-learn, joblib
+- AutoGluon (TimeSeries)
+- MongoDB
+- Streamlit
+
+---
+
+## 📂 File-by-File Explanation
+
+### Top-Level Files
+
+- **README.md**: Project documentation and usage instructions.
+- **Dockerfile**, **docker-compose.yml**: Containerization for reproducible environments.
+- **.env**, **.env.example**, **.env.local**: Environment variable configuration.
+- **service_account.json**: Credentials for external services (if used).
+- **training.log**: Log file for training runs.
+- **dev.sh**, **vm_connect.sh**: Shell scripts for development and VM access.
+
+### Folders
+
+- **.devcontainer/**: VS Code dev container configuration.
+- **.github/**: GitHub Actions workflows for CI/CD.
+- **.vscode/**: VS Code workspace settings and tasks.
+- **artifacts/**: Stores static data artifacts (e.g., holidays.csv, feature columns).
+- **autogluon_models/**: Stores trained model artifacts and logs.
+- **k8s/**: Kubernetes deployment manifests.
+
+### `src/` Directory
+
+#### Main Pipeline
+
+- **main.py**  
+  Orchestrates the entire pipeline: loads data, runs feature engineering, trains models, validates, and saves recommendations. Entry point for retraining (`python3 -m src.main`).
+
+#### Data Handling
+
+- **data_loader.py**  
+  Loads data from MongoDB, saves recommendations, and provides utility functions for data access.
+
+#### Feature Engineering
+
+- **feature_engineering.py**  
+  Cleans and transforms raw sales/inventory/holiday data into model-ready features (lags, rolling stats, calendar, stockout, pricing).
+
+#### Model Training & Validation
+
+- **advanced_pipeline.py**  
+  Contains advanced logic for model training, champion-challenger selection, forecasting, clustering, and inventory metric calculation. Handles deep learning, XGBoost, Prophet, and ensemble models.
+
+- **model_handler.py**  
+  Manages AutoGluon model training, prediction, and ensemble logic. Handles model loading and artifact management.
+
+#### Inventory & Recommendation
+
+- **inventory_calculator.py**  
+  Converts forecasts into actionable inventory metrics (Safety Stock, ROP, EOQ) and applies business rules for recommendations.
+
+#### Dashboard & Visualization
+
+- **inventory_dashboard_streamlit.py**  
+  Streamlit dashboard for interactive visualization of forecasts, SKU analysis, inventory simulation, and executive summaries.
+
+#### Promotion Analysis
+
+- **promo_analyzer.py**  
+  Analyzes the impact of promotions on SKU sales, calculates revenue lift and ROI.
+
+#### Seasonal Analysis
+
+- **seasonal_analysis.py**  
+  Identifies seasonal SKUs and calculates seasonal strength using time-series decomposition.
+
+#### Configuration
+
+- **config.py**  
+  Centralized configuration for paths, model parameters, and pipeline settings.
+
+#### Utilities
+
+- **dbConnect.py**  
+  Handles MongoDB connection logic.
 
 ---
 
@@ -98,7 +121,6 @@ The core of the project is an automated pipeline orchestrated by `src/main.py`. 
 
 ### Running the Training Pipeline
 
-To retrain the model with the latest data and generate new recommendations:
-
 ```bash
 python3 -m src.main
+```
