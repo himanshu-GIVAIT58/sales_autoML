@@ -4,6 +4,8 @@ from src.feature_engineering import (
     generate_static_features,
     prepare_data
 )
+import numpy as np
+import pandas as pd
 from src.model_handler import prepare_prediction_data
 from autogluon.timeseries import TimeSeriesDataFrame, TimeSeriesPredictor
 
@@ -253,25 +255,42 @@ def analyze_sku_growth(sales_df, skus, promo_start, promo_end, before_days=90):
 
     sku_sales = sales_df[sales_df['sku'].isin(skus)].copy()
     sku_sales['created_at'] = pd.to_datetime(sku_sales['created_at'], dayfirst=True, errors='coerce')
-    
-    # Ensure 'price' and 'disc' columns exist and are numeric
-    if 'price' not in sku_sales.columns or 'disc' not in sku_sales.columns:
-        st.error("Error: 'price' and 'disc' columns are required for this analysis.")
-        return pd.DataFrame()
-    
-    sku_sales['price'] = pd.to_numeric(sku_sales['price'], errors='coerce')
-    sku_sales['disc'] = pd.to_numeric(sku_sales['disc'], errors='coerce')
-    sku_sales.dropna(subset=['price', 'disc'], inplace=True)
-    
-    sku_sales['revenue'] = sku_sales['qty'] * sku_sales['price'] * (1 - sku_sales['disc'] / 100)
+
+    cols_to_numeric = ['qty', 'disc', 'revenue']
+    for col in cols_to_numeric:
+        if col in sku_sales.columns:
+            sku_sales[col] = pd.to_numeric(sku_sales[col], errors='coerce')
+        else:
+            print(f"❌ Required column '{col}' not found. Aborting analysis.")
+            return pd.DataFrame()
+            
+    sku_sales.dropna(subset=cols_to_numeric, inplace=True)
+
+    denominator = sku_sales['qty'] * (1 - sku_sales['disc'] / 100)
+    sku_sales['price'] = np.divide(sku_sales['revenue'], denominator, out=np.zeros_like(sku_sales['revenue']), where=denominator!=0)
 
     before_period_sales = sku_sales[(sku_sales['created_at'] >= before_start_date) & (sku_sales['created_at'] <= before_end_date)]
     promo_period_sales = sku_sales[(sku_sales['created_at'] >= promo_start_date) & (sku_sales['created_at'] <= promo_end_date)]
 
     metrics = []
+    print("\n\n===== Starting Detailed SKU Analysis Log =====\n")
     for sku in skus:
+        # --- START DEBUGGING PRINTS ---
+        print(f"--- Analyzing SKU: {sku} ---")
+        
         before_sku = before_period_sales[before_period_sales['sku'] == sku]
-        promo_sku = promo_period_sales[promo_period_sales['sku'] == sku]
+        promo_sku = promo_period_sales[promo_period_sales['sku'] == sku].copy()
+        
+        print(f"Found {len(before_sku)} sales records BEFORE promotion.")
+        if not before_sku.empty:
+            print("Sample 'Before' data:")
+            print(before_sku[['created_at', 'qty', 'disc', 'revenue']].head(2))
+            
+        print(f"\nFound {len(promo_sku)} sales records DURING promotion.")
+        if not promo_sku.empty:
+            print("Sample 'Promo' data:")
+            print(promo_sku[['created_at', 'qty', 'disc', 'revenue', 'price']].head(2))
+        # --- END DEBUGGING PRINTS ---
 
         total_sales_before = before_sku['qty'].sum()
         total_revenue_before = before_sku['revenue'].sum()
@@ -286,19 +305,36 @@ def analyze_sku_growth(sales_df, skus, promo_start, promo_end, before_days=90):
         sales_lift = total_sales_promo - (avg_daily_sales_before * promo_duration_days)
         revenue_lift = total_revenue_promo - ((total_revenue_before / before_days if before_days > 0 else 0) * promo_duration_days)
         
-        # Simple ROI: Revenue Lift / (Gross Revenue * Avg Discount)
         gross_revenue_promo = (promo_sku['qty'] * promo_sku['price']).sum()
-        cost_of_discount = gross_revenue_promo * (avg_discount_promo / 100)
+        cost_of_discount = gross_revenue_promo * (avg_discount_promo / 100) if avg_discount_promo > 0 else 0
         roi = (revenue_lift / cost_of_discount) * 100 if cost_of_discount > 0 else 0
+
+        if avg_daily_sales_before > 0:
+            growth_percentage = ((avg_daily_sales_promo - avg_daily_sales_before) / avg_daily_sales_before) * 100
+        else:
+            growth_percentage = 0.0
+
+        # --- START DEBUGGING PRINTS ---
+        print("\nCalculated Metrics:")
+        print(f"  Avg Daily Sales: Before={avg_daily_sales_before:.2f}, Promo={avg_daily_sales_promo:.2f}")
+        print(f"  Avg Discount Promo: {avg_discount_promo:.2f}%")
+        print(f"  Revenue Lift: {revenue_lift:.2f}")
+        print(f"  Gross Revenue Promo: {gross_revenue_promo:.2f}")
+        print(f"  Cost of Discount: {cost_of_discount:.2f}")
+        print(f"  Discount ROI: {roi:.2f}%")
+        print(f"--------------------------------------\n")
+        # --- END DEBUGGING PRINTS ---
 
         metrics.append({
             "SKU": sku,
             "Avg Daily Sales (Before)": avg_daily_sales_before,
             "Avg Daily Sales (Promo)": avg_daily_sales_promo,
+            "Growth (%)": growth_percentage,
             "Sales Lift (Units)": sales_lift,
             "Revenue Lift ($)": revenue_lift,
             "Avg Discount (%)": avg_discount_promo,
             "Discount ROI (%)": roi
         })
-        
+
+    print("===== End of Detailed Log =====\n")
     return pd.DataFrame(metrics)

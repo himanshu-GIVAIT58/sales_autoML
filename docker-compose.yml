@@ -35,6 +35,7 @@ services:
     volumes:
       - ./artifacts:/app/artifacts
       - ./autogluon_models:/app/autogluon_models
+      - ./service_account.json:/app/service_account.json # Mount service account JSON
     depends_on:
       - mongodb
 

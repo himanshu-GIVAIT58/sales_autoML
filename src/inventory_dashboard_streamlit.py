@@ -306,6 +306,7 @@ elif page == "Promotion Analysis":
     try:
         sales_data = load_dataframe_from_mongo("sales_data")
         all_skus = sorted(sales_data['sku'].unique())
+        print(f"Total SKUs available: {len(all_skus)}")
     except Exception as e:
         st.error(f"Failed to load sales data from MongoDB: {e}")
         st.stop()
@@ -315,7 +316,6 @@ elif page == "Promotion Analysis":
     
     col1, col2 = st.columns(2)
     with col1:
-        # Example: Jan 1, 2025 to April 30, 2025
         promo_start = st.date_input("Promotion Start Date", datetime(2025, 1, 1))
     with col2:
         promo_end = st.date_input("Promotion End Date", datetime(2025, 4, 30))
@@ -329,6 +329,8 @@ elif page == "Promotion Analysis":
         value=90, 
         help="How many days before the promotion start date should be used for comparison?"
     )
+   
+    print(before_period_days)
 
     # --- Run Analysis ---
     if st.button("🚀 Analyze SKU Growth", use_container_width=True, type="primary"):
@@ -339,22 +341,29 @@ elif page == "Promotion Analysis":
         else:
             with st.spinner("Analyzing growth..."):
                 results_df = analyze_sku_growth(sales_data, selected_skus, promo_start, promo_end, before_period_days)
-                
-                st.subheader("2. Analysis Results", divider="blue")
-                st.markdown(f"Comparing the promotion period (`{promo_start}` to `{promo_end}`) with the **{before_period_days} days** prior.")
+                print(results_df.head())  # Debugging output
+            st.subheader("2. Analysis Results", divider="blue")
+            st.markdown(f"Comparing the promotion period (`{promo_start}` to `{promo_end}`) with the **{before_period_days} days** prior.")
 
+            # --- FIX #2: Check if the DataFrame is empty BEFORE using it ---
+            if results_df.empty:
+                st.info("No sales data found for the selected SKUs and date ranges. Please adjust your selection.")
+            else:
                 # Display the results table
                 st.dataframe(results_df, use_container_width=True, hide_index=True,
                     column_config={
-                        "Total Sales (Before)": st.column_config.NumberColumn(format="%d"),
+                        # --- FIX #1: Removed non-existent columns and corrected existing ones ---
                         "Avg Daily Sales (Before)": st.column_config.NumberColumn(format="%.2f"),
-                        "Total Sales (Promo)": st.column_config.NumberColumn(format="%d"),
                         "Avg Daily Sales (Promo)": st.column_config.NumberColumn(format="%.2f"),
                         "Growth (%)": st.column_config.ProgressColumn(
                             format="%.1f%%",
+                            help="The percentage growth in average daily sales from the 'before' period to the 'promo' period.",
                             min_value=float(results_df['Growth (%)'].min()),
                             max_value=float(results_df['Growth (%)'].max())
                         ),
+                        "Sales Lift (Units)": st.column_config.NumberColumn(format="%d"),
+                        "Revenue Lift ($)": st.column_config.NumberColumn(format="$%.2f"),
+                        "Discount ROI (%)": st.column_config.NumberColumn(format="%.1f%%"),
                     }
                 )
 
@@ -375,8 +384,7 @@ elif page == "Promotion Analysis":
                 ).properties(
                     title="Average Daily Sales: Before vs. During Promotion"
                 )
-                st.altair_chart(bar_chart, use_container_width=True)
-                
+                st.altair_chart(bar_chart, use_container_width=True)              
 elif page == "Seasonal Analysis":
     st.header("❄️ Advanced Seasonal SKU Analysis Dashboard")
 
