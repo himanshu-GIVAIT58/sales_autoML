@@ -29,16 +29,6 @@ This project provides an end-to-end, automated pipeline for forecasting future s
 6. **Recommendation Generation**: Generates forecasts and inventory recommendations.
 7. **Saving & Logging**: Saves recommendations and logs artifacts to MongoDB.
 
----
-
-## 🛠️ Technology Stack
-
-- Python, pandas, scikit-learn, joblib
-- AutoGluon (TimeSeries)
-- MongoDB
-- Streamlit
-
----
 
 ## 📂 File-by-File Explanation
 
@@ -47,8 +37,8 @@ This project provides an end-to-end, automated pipeline for forecasting future s
 - **README.md**: Project documentation and usage instructions.
 - **Dockerfile**, **docker-compose.yml**: Containerization for reproducible environments.
 - **.env**, **.env.example**, **.env.local**: Environment variable configuration.
-- **service_account.json**: Credentials for external services (if used).
-- **training.log**: Log file for training runs.
+- **service_account.json**: Credentials for BigQuery.
+- **training.log**: Log file for training runs after pushing to github.
 - **dev.sh**, **vm_connect.sh**: Shell scripts for development and VM access.
 
 ### Folders
