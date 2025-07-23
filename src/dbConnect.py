@@ -12,7 +12,8 @@ mongo_db_name = os.getenv("MONGO_DB", "sales_automl")
 
 # Build the full, correct connection string for Kubernetes
 # The "?authSource=admin" part is added for proper authentication
-connection_uri = f"mongodb://{mongo_user}:{mongo_pass}@{mongo_host}:{mongo_port}/{mongo_db_name}?authSource=admin"
+#connection_uri = f"mongodb://{mongo_user}:{mongo_pass}@{mongo_host}:{mongo_port}/{mongo_db_name}?authSource=admin"
+connection_uri = os.getenv("MONGO_URI")
 
 # Use the dynamically built URI
 client = pymongo.MongoClient(connection_uri)
