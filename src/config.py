@@ -42,7 +42,7 @@ MAX_SKUS = None  # Set to an integer for testing, None for all.
 PREDICTION_LENGTH = 183
 RANDOM_SEED = 42
 # 
-AUTOGLUON_PRESETS = ["fast_training"]
+AUTOGLUON_PRESETS = ["best_quality"]
 
 TIME_LIMIT = 3600  # 8 hours
 NUM_VAL_WINDOWS = 5
@@ -57,7 +57,7 @@ TRAINING = {
     "PREDICTION_LENGTH": 183,
     "FREQ": "D",
     "EVAL_METRIC": "MASE", 
-    "PRESETS": ["fast_training"], # Using a list for multi-preset training
+    "PRESETS": ["best_quality"], # Using a list for multi-preset training
     "TIME_LIMIT": 3600,  # 1 hour
     "NUM_VAL_WINDOWS": 5,
     "QUANTILE_LEVELS": [0.1, 0.25, 0.5, 0.75, 0.9],
